@@ -3,6 +3,9 @@ build/
 obj/
 dist/
 
+# Keep docs/ for GitHub Pages (committed intentionally)
+!docs/
+
 # QEMU logs
 *.log
 *.txt

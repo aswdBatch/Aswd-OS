@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AswdOS</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+  }
+  header {
+    width: 100%;
+    padding: 14px 24px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header span { font-size: 13px; color: #8b949e; }
+  #screen-wrap {
+    margin: 24px auto;
+    position: relative;
+    width: 800px;
+  }
+  #screen {
+    display: block;
+    width: 800px;
+    height: 600px;
+    background: #000;
+    border: 2px solid #30363d;
+    border-radius: 4px;
+    cursor: pointer;
+    image-rendering: pixelated;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(13,17,23,0.88);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  #overlay h2 { font-size: 28px; font-weight: 700; }
+  #overlay p  { font-size: 14px; color: #8b949e; text-align: center; max-width: 360px; line-height: 1.6; }
+  #btn-start {
+    padding: 12px 32px;
+    background: #238636;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #btn-start:hover { background: #2ea043; }
+  #status {
+    font-size: 13px;
+    color: #8b949e;
+    margin-top: 8px;
+    min-height: 20px;
+    text-align: center;
+  }
+  #controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    align-items: center;
+    width: 800px;
+    justify-content: flex-end;
+  }
+  #controls button {
+    padding: 6px 14px;
+    background: #21262d;
+    color: #e6edf3;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #controls button:hover { background: #30363d; }
+  #loading-bar-wrap {
+    width: 280px;
+    height: 4px;
+    background: #21262d;
+    border-radius: 2px;
+    overflow: hidden;
+    display: none;
+  }
+  #loading-bar {
+    height: 100%;
+    width: 0%;
+    background: #238636;
+    transition: width 0.3s;
+  }
+  footer {
+    margin-top: auto;
+    padding: 16px;
+    font-size: 12px;
+    color: #484f58;
+    text-align: center;
+  }
+  footer a { color: #58a6ff; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AswdOS</h1>
+  <span>v0.7 · i386 bare-metal OS · running in v86</span>
+</header>
+
+<div style="height:24px"></div>
+<div id="controls" style="display:none">
+  <button onclick="toggleFullscreen()">Fullscreen</button>
+  <button onclick="sendCtrlAltDel()">Ctrl+Alt+Del</button>
+  <button onclick="takeScreenshot()">Screenshot</button>
+</div>
+
+<div id="screen-wrap">
+  <canvas id="screen"></canvas>
+  <div id="overlay">
+    <h2>AswdOS</h2>
+    <p>A bare-metal hobby OS running entirely in your browser via x86 emulation. No install needed.</p>
+    <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+    <button id="btn-start" onclick="startVM()">Boot AswdOS</button>
+    <div id="status"></div>
+  </div>
+</div>
+
+<footer>
+  Powered by <a href="https://github.com/copy/v86" target="_blank">v86</a> ·
+  Source on <a href="https://github.com/aswdBatch/Aswd-OS" target="_blank">GitHub</a>
+</footer>
+
+<script src="libv86.js"></script>
+<script>
+var emulator = null;
+
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+function startVM() {
+  var btn = document.getElementById('btn-start');
+  var bar = document.getElementById('loading-bar-wrap');
+  var barFill = document.getElementById('loading-bar');
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  bar.style.display = 'block';
+  setStatus('Downloading OS image...');
+
+  emulator = new V86({
+    wasm_path: "v86.wasm",
+    memory_size: 64 * 1024 * 1024,
+    vga_memory_size: 8 * 1024 * 1024,
+    screen_container: document.getElementById('screen-wrap'),
+    bios: { url: "seabios.bin" },
+    vga_bios: { url: "vgabios.bin" },
+    cdrom: { url: "aswd.iso" },
+    autostart: true,
+  });
+
+  emulator.add_listener("download-progress", function(e) {
+    if (e.total) {
+      var pct = Math.round(e.loaded / e.total * 100);
+      barFill.style.width = pct + '%';
+      setStatus('Downloading... ' + pct + '%');
+    }
+  });
+
+  emulator.add_listener("emulator-ready", function() {
+    setStatus('Booting...');
+    barFill.style.width = '100%';
+  });
+
+  emulator.add_listener("screen-set-mode", function() {
+    // Graphics mode active — hide the overlay
+    setTimeout(function() {
+      document.getElementById('overlay').style.display = 'none';
+      document.getElementById('controls').style.display = 'flex';
+    }, 500);
+  });
+}
+
+function toggleFullscreen() {
+  var wrap = document.getElementById('screen-wrap');
+  if (!document.fullscreenElement) {
+    wrap.requestFullscreen();
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+function sendCtrlAltDel() {
+  if (emulator) {
+    emulator.keyboard_send_scancodes([0x1d, 0x38, 0x53, 0xd3, 0xb8, 0x9d]);
+  }
+}
+
+function takeScreenshot() {
+  if (!emulator) return;
+  var canvas = document.querySelector('#screen-wrap canvas');
+  if (!canvas) return;
+  var a = document.createElement('a');
+  a.download = 'aswdos-screenshot.png';
+  a.href = canvas.toDataURL();
+  a.click();
+}
+
+// Prevent space/arrow keys from scrolling the page when the emulator is focused
+document.addEventListener('keydown', function(e) {
+  if (emulator && [32, 37, 38, 39, 40].includes(e.keyCode)) {
+    e.preventDefault();
+  }
+});
+</script>
+</body>
+</html>
