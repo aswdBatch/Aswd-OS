@@ -1,0 +1,14 @@
+# Build output
+build/
+obj/
+dist/
+
+# QEMU logs
+*.log
+*.txt
+
+# Claude internal
+.claude/
+
+# Windows
+Thumbs.db

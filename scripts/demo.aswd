@@ -1,0 +1,12 @@
+# Aswd OS Script Demo
+
+echo === Demo ===
+osinfo
+
+confirm Proceed?
+iflast ack
+sysinfo
+
+set msg=Hello from script
+echo $msg
+
