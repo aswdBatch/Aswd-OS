@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -140,13 +140,13 @@
 
 <header>
   <h1>AswdOS</h1>
-  <span>v0.7 Ā· i386 bare-metal OS Ā· running in v86</span>
+  <span>v0.7 · i386 bare-metal OS · running in v86</span>
 </header>
 <div class="banner banner-available">
-  <span>⚡</span>&nbsp;Run Aswd-OS in your browser — no install needed. Just click Boot and go.
+  <span>?</span>&nbsp;Run Aswd-OS in your browser � no install needed. Just click Boot and go.
 </div>
 <div class="banner banner-warning">
-  <span>⚠</span>&nbsp;<strong>Performance note:</strong> This runs through a JavaScript x86 emulator (v86) — expect significantly slower speed than bare-metal hardware.
+  <span>?</span>&nbsp;<strong>Performance note:</strong> This runs through a JavaScript x86 emulator (v86) � expect significantly slower speed than bare-metal hardware.
 </div>
 
 <div style="height:24px"></div>
@@ -168,7 +168,7 @@
 </div>
 
 <footer>
-  Powered by <a href="https://github.com/copy/v86" target="_blank">v86</a> Ā·
+  Powered by <a href="https://github.com/copy/v86" target="_blank">v86</a> ·
   Source on <a href="https://github.com/aswdBatch/Aswd-OS" target="_blank">GitHub</a>
 </footer>
 
@@ -196,7 +196,7 @@ function startVM() {
     screen_container: document.getElementById('screen-wrap'),
     bios: { url: "seabios.bin" },
     vga_bios: { url: "vgabios.bin" },
-    cdrom: { url: "aswd.iso" },
+    hda: { url: "aswd-usb.img" },
     autostart: true,
   });
 
@@ -214,7 +214,7 @@ function startVM() {
   });
 
   emulator.add_listener("screen-set-mode", function() {
-    // Graphics mode active ā€” hide the overlay
+    // Graphics mode active — hide the overlay
     setTimeout(function() {
       document.getElementById('overlay').style.display = 'none';
       document.getElementById('controls').style.display = 'flex';
