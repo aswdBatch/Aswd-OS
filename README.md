@@ -1,6 +1,14 @@
 ﻿# Aswd OS
 
 Bare-metal x86 (i686) command-line operating system (CLI only).
+## Try it in your browser
+
+**Live demo: [https://aswdbatch.github.io/Aswd-OS](https://aswdbatch.github.io/Aswd-OS)**
+
+No install, no build tools, no USB stick needed — just open the link and click **Boot AswdOS**.
+
+> **Performance note:** The web version runs through [v86](https://github.com/copy/v86), a JavaScript x86 emulator. It works, but it is **not native speed** — expect noticeably slower boot times and shell response compared to running on real hardware or even QEMU. This is a browser-based emulator constraint, not an OS bug.
+
 
 ## Start here
 

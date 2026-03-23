@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -114,14 +114,40 @@
     text-align: center;
   }
   footer a { color: #58a6ff; text-decoration: none; }
-</style>
+  .banner {
+    width: 100%;
+    padding: 9px 24px;
+    font-size: 13px;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    letter-spacing: 0.01em;
+  }
+  .banner-available {
+    background: #0d2417;
+    border-bottom: 1px solid #238636;
+    color: #3fb950;
+  }
+  .banner-warning {
+    background: #2d1f00;
+    border-bottom: 1px solid #9e6a03;
+    color: #e3b341;
+  }</style>
 </head>
 <body>
 
 <header>
   <h1>AswdOS</h1>
-  <span>v0.7 · i386 bare-metal OS · running in v86</span>
+  <span>v0.7 Ā· i386 bare-metal OS Ā· running in v86</span>
 </header>
+<div class="banner banner-available">
+  <span>⚡</span>&nbsp;Run Aswd-OS in your browser — no install needed. Just click Boot and go.
+</div>
+<div class="banner banner-warning">
+  <span>⚠</span>&nbsp;<strong>Performance note:</strong> This runs through a JavaScript x86 emulator (v86) — expect significantly slower speed than bare-metal hardware.
+</div>
 
 <div style="height:24px"></div>
 <div id="controls" style="display:none">
@@ -142,7 +168,7 @@
 </div>
 
 <footer>
-  Powered by <a href="https://github.com/copy/v86" target="_blank">v86</a> ·
+  Powered by <a href="https://github.com/copy/v86" target="_blank">v86</a> Ā·
   Source on <a href="https://github.com/aswdBatch/Aswd-OS" target="_blank">GitHub</a>
 </footer>
 
@@ -188,7 +214,7 @@ function startVM() {
   });
 
   emulator.add_listener("screen-set-mode", function() {
-    // Graphics mode active — hide the overlay
+    // Graphics mode active ā€” hide the overlay
     setTimeout(function() {
       document.getElementById('overlay').style.display = 'none';
       document.getElementById('controls').style.display = 'flex';
