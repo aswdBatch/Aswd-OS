@@ -4,6 +4,17 @@ OBJCOPY := i686-elf-objcopy
 POWERSHELL := powershell
 OBJDIR := obj
 
+# Cross-platform directory creation
+ifeq ($(OS),Windows_NT)
+  MKDIR_OBJ = @cmd /c "if not exist $(subst /,\,$(@D)) mkdir $(subst /,\,$(@D))"
+  MKDIR_DIST = @cmd /c "if not exist dist mkdir dist"
+  CLEAN_CMD = @cmd /c "if exist $(OBJDIR) rmdir /s /q $(OBJDIR) & if exist dist rmdir /s /q dist"
+else
+  MKDIR_OBJ = @mkdir -p $(@D)
+  MKDIR_DIST = @mkdir -p dist
+  CLEAN_CMD = @rm -rf $(OBJDIR) dist
+endif
+
 CFLAGS := -std=c99 -O2 -ffreestanding -Wall -Wextra -fno-pic -fno-pie -fno-stack-protector -fno-builtin -Isrc
 LDFLAGS := -ffreestanding -nostdlib -fno-pie
 
@@ -130,26 +141,26 @@ OBJ_TRAMPOLINE := $(OBJDIR)/usbboot/trampoline.o
 all: iso
 
 $(OBJDIR)/%.o: src/%.c
-	@cmd /c "if not exist $(subst /,\,$(@D)) mkdir $(subst /,\,$(@D))"
+	$(MKDIR_OBJ)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)/%.o: src/%.asm
-	@cmd /c "if not exist $(subst /,\,$(@D)) mkdir $(subst /,\,$(@D))"
+	$(MKDIR_OBJ)
 	$(AS) -f elf32 $< -o $@
 
 $(OBJDIR)/usbboot/trampoline.bin: src/usbboot/trampoline.asm
-	@cmd /c "if not exist $(subst /,\,$(@D)) mkdir $(subst /,\,$(@D))"
+	$(MKDIR_OBJ)
 	$(AS) -f bin $< -o $@
 
 $(OBJDIR)/usbboot/trampoline.o: $(OBJDIR)/usbboot/trampoline.bin
 	$(OBJCOPY) -I binary -O elf32-i386 -B i386 $< $@
 
 dist/kernel.elf: $(OBJ_COMMON) $(OBJ_TRAMPOLINE) $(OBJ_GRUB) linker.ld
-	@cmd /c "if not exist dist mkdir dist"
+	$(MKDIR_DIST)
 	$(CC) -T linker.ld -o $@ $(LDFLAGS) $(OBJ_COMMON) $(OBJ_TRAMPOLINE) $(OBJ_GRUB) -lgcc
 
 dist/kernel-bios.elf: $(OBJ_COMMON) $(OBJ_TRAMPOLINE) $(OBJ_BIOS) linker.ld
-	@cmd /c "if not exist dist mkdir dist"
+	$(MKDIR_DIST)
 	$(CC) -T linker.ld -Wl,-e,bios_start -o $@ $(LDFLAGS) $(OBJ_BIOS) $(OBJ_COMMON) $(OBJ_TRAMPOLINE) -lgcc
 
 dist/kernel-bios.bin: dist/kernel-bios.elf
@@ -159,8 +170,7 @@ iso: dist/aswd.iso
 
 dist/aswd.iso: dist/kernel.elf grub.cfg
 	@rm -rf dist/isodir
-	@cmd /c "if not exist dist mkdir dist"
-	@cmd /c "if not exist dist\\isodir\\boot\\grub mkdir dist\\isodir\\boot\\grub"
+	@mkdir -p dist/isodir/boot/grub
 	@cp dist/kernel.elf dist/isodir/boot/kernel.elf
 	@cp grub.cfg dist/isodir/boot/grub/grub.cfg
 	grub-mkrescue -o $@ dist/isodir >/dev/null 2>&1
@@ -198,4 +208,4 @@ test-iso: dist/kernel.elf grub-test.cfg
 	grub-mkrescue -o dist/aswd-test.iso dist/isodir 2>/dev/null
 
 clean:
-	@cmd /c "if exist $(OBJDIR) rmdir /s /q $(OBJDIR) & if exist dist rmdir /s /q dist"
+	$(CLEAN_CMD)
