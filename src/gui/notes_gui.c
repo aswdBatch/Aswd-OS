@@ -8,6 +8,7 @@
 #include "drivers/keyboard.h"
 #include "fs/vfs.h"
 #include "gui/gui.h"
+#include "gui/theme.h"
 #include "lib/string.h"
 
 /* ---- Layout ---- */
@@ -129,22 +130,19 @@ static void draw_btn(gui_rect_t cr, int bx, int label_short,
                      const char *label, uint32_t bg, uint32_t fg) {
     (void)label_short;
     int x = cr.x + bx;
-    int y = cr.y + (TOOLBAR_H - BTN_H) / 2;
-    gfx_fill_rect(x, y, BTN_W, BTN_H, bg);
-    gfx_fill_rect(x, y, BTN_W, 1, COL_BORDER);
-    gfx_fill_rect(x, y + BTN_H - 1, BTN_W, 1, COL_BORDER);
-    gfx_fill_rect(x, y, 1, BTN_H, COL_BORDER);
-    gfx_fill_rect(x + BTN_W - 1, y, 1, BTN_H, COL_BORDER);
-    int tx = x + (BTN_W - (int)str_len(label) * FONT_WIDTH) / 2;
-    gfx_draw_string(tx, y + (BTN_H - FONT_HEIGHT) / 2, label, fg, bg);
+    int y = cr.y + (th_metrics()->toolbar_h - BTN_H) / 2;
+    (void)bg;
+    (void)fg;
+    th_draw_button(x, y, BTN_W, BTN_H, label, str_eq(label, "SaveAs"));
 }
 
 static void on_paint(int win_id) {
+    const th_metrics_t *tm = th_metrics();
     gui_rect_t cr = gui_window_content(win_id);
     int cw = cr.w, ch = cr.h;
 
     /* Toolbar */
-    gfx_fill_rect(cr.x, cr.y, cw, TOOLBAR_H, COL_TOOLBAR);
+    th_draw_toolbar(cr.x, cr.y, cw, "Notes");
     int bx = PAD;
     draw_btn(cr, bx, 0, "New",   COL_BTN,      COL_BTN_TXT);  bx += BTN_W + 6;
     draw_btn(cr, bx, 0, "Open",  COL_BTN,      COL_BTN_TXT);  bx += BTN_W + 6;
@@ -152,8 +150,7 @@ static void on_paint(int win_id) {
     draw_btn(cr, bx, 0, "SaveAs",COL_BTN_SAVE, COL_BTN_STXT);
 
     /* Status bar */
-    int sy = cr.y + ch - STATUS_H;
-    gfx_fill_rect(cr.x, sy, cw, STATUS_H, COL_STATUS);
+    int sy = cr.y + ch - tm->status_h;
     char statbuf[96];
     const char *base = g_path[0] ? g_path : "(unsaved)";
     if (g_dirty_flag)
@@ -162,11 +159,11 @@ static void on_paint(int win_id) {
         statbuf[0] = '\0';
     str_cat(statbuf, base, sizeof(statbuf));
     if (g_msg[0]) { str_cat(statbuf, "  ", sizeof(statbuf)); str_cat(statbuf, g_msg, sizeof(statbuf)); }
-    gfx_draw_string(cr.x + PAD, sy + (STATUS_H - FONT_HEIGHT) / 2, statbuf, COL_ST_TXT, COL_STATUS);
+    th_draw_statusbar(cr.x, sy, cw, tm->status_h, statbuf);
 
     /* Text area */
-    int ty = cr.y + TOOLBAR_H;
-    int th = ch - TOOLBAR_H - STATUS_H;
+    int ty = cr.y + tm->toolbar_h;
+    int th = ch - tm->toolbar_h - tm->status_h;
     gfx_fill_rect(cr.x, ty, cw, th, COL_BODY_BG);
     int content_rows = th / ROW_H;
     clamp_view(content_rows);
@@ -187,27 +184,19 @@ static void on_paint(int win_id) {
     if (g_saveas_open) {
         int dw = cw - 60, dh = 100;
         int dx = cr.x + 30, dy = cr.y + (ch - dh) / 2;
-        gfx_fill_rect(dx, dy, dw, dh, COL_DIALOG_BG);
-        gfx_fill_rect(dx, dy, dw, 1, COL_BORDER);
-        gfx_fill_rect(dx, dy + dh - 1, dw, 1, COL_BORDER);
-        gfx_fill_rect(dx, dy, 1, dh, COL_BORDER);
-        gfx_fill_rect(dx + dw - 1, dy, 1, dh, COL_BORDER);
-        gfx_draw_string(dx + 10, dy + 10, "Save As - enter path:", COL_DIALOG_TXT, COL_DIALOG_BG);
+        th_draw_dialog(dx, dy, dw, dh, "Save As");
+        th_draw_text(dx + 10, dy + tm->header_h + 6, "Enter a path under /ROOT/",
+                     COL_DIALOG_TXT, TH_BG_PANEL, tm->font_body);
         /* Input field */
-        int ix = dx + 10, iy = dy + 36, iw = dw - 20, ih = 24;
-        gfx_fill_rect(ix, iy, iw, ih, COL_INPUT_BG);
-        gfx_fill_rect(ix, iy, iw, 1, COL_BORDER);
-        gfx_fill_rect(ix, iy + ih - 1, iw, 1, COL_BORDER);
-        gfx_fill_rect(ix, iy, 1, ih, COL_BORDER);
-        gfx_fill_rect(ix + iw - 1, iy, 1, ih, COL_BORDER);
-        gfx_draw_string(ix + 4, iy + (ih - FONT_HEIGHT) / 2,
-                        g_saveas_buf, COL_INPUT_TXT, COL_INPUT_BG);
+        int ix = dx + 10, iy = dy + tm->header_h + 28, iw = dw - 20, ih = tm->field_h;
+        th_draw_field(ix, iy, iw, "", 1, 0);
+        th_draw_text(ix + 4, iy + (ih - tm->font_body) / 2,
+                     g_saveas_buf, COL_INPUT_TXT, TH_BG_FIELD, tm->font_body);
         /* Cursor in input */
         int curs_x = ix + 4 + g_saveas_len * FONT_WIDTH;
         gfx_fill_rect(curs_x, iy + 3, 2, ih - 6, COL_CURSOR);
-        gfx_draw_string(dx + 10, dy + 68,
-                        "Enter to confirm  |  Esc to cancel",
-                        COL_DIALOG_TXT, COL_DIALOG_BG);
+        th_draw_text(dx + 10, dy + dh - 24, "Enter to confirm  |  Esc to cancel",
+                     COL_DIALOG_TXT, TH_BG_PANEL, tm->font_small);
     }
 }
 
@@ -376,6 +365,7 @@ void notes_gui_launch(void) {
     gui_window_suggest_rect(560, 440, &r);
     g_win_id = gui_window_create("Notes", r.x, r.y, r.w, r.h);
     if (g_win_id < 0) return;
+    gui_window_set_min_size(g_win_id, 420, 300);
 
     gui_window_t *w = gui_get_window(g_win_id);
     w->on_paint = on_paint;

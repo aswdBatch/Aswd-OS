@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "cpu/timer.h"
 #include "net/ethernet.h"
 #include "net/net.h"
 #include "lib/string.h"
@@ -78,15 +79,32 @@ static void arp_send_request(const uint8_t *target_ip) {
 }
 
 int arp_resolve(const uint8_t *ip, uint8_t *mac_out) {
-    int i;
-    for (i = 0; i < ARP_CACHE_SIZE; i++) {
-        if (g_cache[i].valid && ip_eq(g_cache[i].ip, ip)) {
-            eth_addr_copy(mac_out, g_cache[i].mac);
-            return 1;
+    int i, attempt;
+
+    for (attempt = 0; attempt < 3; attempt++) {
+        /* Check cache */
+        for (i = 0; i < ARP_CACHE_SIZE; i++) {
+            if (g_cache[i].valid && ip_eq(g_cache[i].ip, ip)) {
+                eth_addr_copy(mac_out, g_cache[i].mac);
+                return 1;
+            }
+        }
+        /* Not in cache — send request and wait up to 1 second */
+        arp_send_request(ip);
+        {
+            uint32_t deadline = timer_get_ticks() + 100u; /* 100 ticks = 1s */
+            while (timer_get_ticks() < deadline) {
+                net_poll();
+                for (i = 0; i < ARP_CACHE_SIZE; i++) {
+                    if (g_cache[i].valid && ip_eq(g_cache[i].ip, ip)) {
+                        eth_addr_copy(mac_out, g_cache[i].mac);
+                        return 1;
+                    }
+                }
+                __asm__ volatile("sti; hlt");
+            }
         }
     }
-    /* Not found: send ARP request */
-    arp_send_request(ip);
     return 0;
 }
 

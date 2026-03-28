@@ -134,12 +134,15 @@ def main() -> int:
     # Inject a standard DOS partition table entry at MBR offset 446 so the
     # ATA driver can locate the FAT32 partition when booting via ATA (QEMU).
     part_entry = bytearray(16)
-    part_entry[0] = 0x80        # Active/bootable
-    part_entry[4] = 0x0C        # Type: FAT32 LBA
-    # CHS start/end – use 0xFE/0xFF/0xFF to indicate "use LBA" to old tools
-    part_entry[1] = 0xFE;  part_entry[2] = 0xFF;  part_entry[3] = 0xFF
-    part_entry[5] = 0xFE;  part_entry[6] = 0xFF;  part_entry[7] = 0xFF
-    struct.pack_into("<I", part_entry, 8,  PARTITION_START)
+    part_entry[0] = 0x80
+    part_entry[4] = 0x0C
+    part_entry[1] = 0xFE
+    part_entry[2] = 0xFF
+    part_entry[3] = 0xFF
+    part_entry[5] = 0xFE
+    part_entry[6] = 0xFF
+    part_entry[7] = 0xFF
+    struct.pack_into("<I", part_entry, 8, PARTITION_START)
     struct.pack_into("<I", part_entry, 12, partition_sectors)
     image[446:462] = bytes(part_entry)
     image[510] = 0x55
@@ -161,7 +164,7 @@ def main() -> int:
     # Layout of the FAT32 reserved area (32 sectors):
     #   +0  VBR (boot sector)
     #   +1  FSInfo
-    #   +2  AUTH sector — reserved for auth_store; zeroed = no admin exists
+    #   +2  AUTH sector - reserved for auth_store; zeroed = no admin exists
     #   +3..+5  unused
     #   +6  backup VBR
     #   +7..+31 unused

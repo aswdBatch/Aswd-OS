@@ -9,6 +9,7 @@
 #include "fs/vfs.h"
 #include "gui/axdocs_gui.h"
 #include "gui/gui.h"
+#include "gui/theme.h"
 #include "lang/lang.h"
 #include "lib/string.h"
 
@@ -16,12 +17,12 @@
 #define EDITOR_LINE_CAP    161
 #define EDITOR_TEXT_CAP    (EDITOR_MAX_LINES * EDITOR_LINE_CAP + 1)
 
-#define TOOLBAR_H          34
-#define STATUS_H           22
+#define TOOLBAR_H          (th_metrics()->toolbar_h)
+#define STATUS_H           (th_metrics()->status_h)
 #define PANEL_PAD          10
 #define GUTTER_W           44
 #define ROW_H              (FONT_HEIGHT + 2)
-#define BUTTON_H           22
+#define BUTTON_H           (th_metrics()->button_h)
 
 #define COL_BG             gfx_rgb(242, 246, 252)
 #define COL_TOOLBAR        gfx_rgb(34, 52, 84)
@@ -575,12 +576,7 @@ static void editor_button_rect(int button, int *x, int *y, int *w, int *h) {
 }
 
 static void editor_draw_button(int px, int py, int w, int h, const char *label) {
-    int text_x = px + (w - (int)str_len(label) * FONT_WIDTH) / 2;
-    int text_y = py + (h - FONT_HEIGHT) / 2;
-
-    gfx_fill_rect(px, py, w, h, COL_BORDER);
-    gfx_fill_rect(px + 1, py + 1, w - 2, h - 2, COL_BUTTON);
-    gfx_draw_string(text_x, text_y, label, COL_BUTTON_TXT, COL_BUTTON);
+    th_draw_button(px, py, w, h, label, 0);
 }
 
 /* ---- Syntax highlighting ---- */
@@ -673,6 +669,7 @@ static void draw_line_highlighted(int base_x, int y, int line_idx,
 }
 
 static void editor_on_paint(int win_id) {
+    const th_metrics_t *tm = th_metrics();
     gui_rect_t r = gui_window_content(win_id);
     int body_y = r.y + TOOLBAR_H;
     int body_h = r.h - TOOLBAR_H - STATUS_H;
@@ -685,11 +682,9 @@ static void editor_on_paint(int win_id) {
     editor_ensure_visible();
 
     gfx_fill_rect(r.x, r.y, r.w, r.h, COL_BG);
-    gfx_fill_rect(r.x, r.y, r.w, TOOLBAR_H, COL_TOOLBAR);
+    th_draw_toolbar(r.x, r.y, r.w, "AX Code");
     gfx_fill_rect(r.x, body_y, r.w, body_h, COL_BODY);
-    gfx_fill_rect(r.x, r.y + r.h - STATUS_H, r.w, STATUS_H, COL_STATUS);
-    gfx_fill_rect(r.x, r.y + TOOLBAR_H - 1, r.w, 1, COL_BORDER);
-    gfx_fill_rect(r.x, r.y + r.h - STATUS_H, r.w, 1, COL_BORDER);
+    th_draw_statusbar(r.x, r.y + r.h - STATUS_H, r.w, STATUS_H, "");
 
     {
         static const char *btn_labels[] = { "New", "Open", "Save", "Run", "Docs" };
@@ -701,7 +696,8 @@ static void editor_on_paint(int win_id) {
     }
 
     clip_text(path_line, sizeof(path_line), g_file_path, (r.w - 286) / FONT_WIDTH);
-    gfx_draw_string(r.x + 280, r.y + 9, path_line, COL_TOOLBAR_TXT, COL_TOOLBAR);
+    th_draw_text(r.x + 280, r.y + (TOOLBAR_H - tm->font_body) / 2,
+                 path_line, COL_TOOLBAR_TXT, TH_BG_TOOLBAR, tm->font_body);
 
     gfx_fill_rect(r.x + PANEL_PAD, body_y + PANEL_PAD, GUTTER_W,
                   body_h - PANEL_PAD * 2, COL_GUTTER);
@@ -768,7 +764,8 @@ static void editor_on_paint(int win_id) {
     str_cat(status, g_insert_mode ? "INS" : "OVR", sizeof(status));
     str_cat(status, g_dirty ? " *" : " saved", sizeof(status));
     str_cat(status, " | Ctrl+S | Ctrl+Q", sizeof(status));
-    gfx_draw_string(r.x + 10, r.y + r.h - STATUS_H + 4, status, COL_STATUS_TXT, COL_STATUS);
+    th_draw_text(r.x + 10, r.y + r.h - STATUS_H + (STATUS_H - tm->font_small) / 2,
+                 status, COL_STATUS_TXT, TH_BG_STATUS, tm->font_small);
 
     /* Open file overlay */
     if (g_open_overlay) {

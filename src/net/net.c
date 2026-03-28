@@ -11,6 +11,7 @@
 #include "net/ip.h"
 #include "net/rtl8139.h"
 #include "net/rtl8168.h"
+#include "net/wifi.h"
 #include "lib/string.h"
 
 /* Log all network-class PCI devices via serial for diagnostics */
@@ -53,6 +54,51 @@ static net_info_t g_info;
 /* ---- RX frame buffer ---- */
 static uint8_t g_rx_frame[ETH_MAX_FRAME];
 
+static int net_has_ipv4(const uint8_t *ip) {
+    return ip[0] || ip[1] || ip[2] || ip[3];
+}
+
+static net_connection_state_t net_wifi_state_map(wifi_state_t state) {
+    switch (state) {
+        case WIFI_STATE_IDLE: return NET_CONN_IDLE;
+        case WIFI_STATE_SCANNING: return NET_CONN_SCANNING;
+        case WIFI_STATE_CONNECTING: return NET_CONN_CONNECTING;
+        case WIFI_STATE_CONNECTED: return NET_CONN_CONNECTED;
+        case WIFI_STATE_UNSUPPORTED: return NET_CONN_UNSUPPORTED;
+        default: return NET_CONN_DOWN;
+    }
+}
+
+static void net_refresh_runtime_state(void) {
+    const wifi_adapter_info_t *wa = wifi_adapter_info();
+
+    g_info.wifi_detected = wa->present;
+    g_info.wifi_supported = wa->supported;
+    g_info.wifi_backend_ready = wa->backend_ready;
+    g_info.wifi_signal_pct = wifi_signal_strength();
+    g_info.wifi_security = (uint8_t)wifi_current_security();
+    g_info.wifi_family = (uint8_t)wa->family;
+    str_copy(g_info.wifi_name, wa->name, sizeof(g_info.wifi_name));
+    str_copy(g_info.wifi_ssid, wifi_current_ssid(), sizeof(g_info.wifi_ssid));
+
+    if (g_info.link_up) {
+        g_info.active_transport = NET_TRANSPORT_WIRED;
+        if (net_has_ipv4(g_info.ip)) g_info.connection_state = NET_CONN_CONNECTED;
+        else if (g_info.dhcp_pending) g_info.connection_state = NET_CONN_DISCOVERING;
+        else g_info.connection_state = NET_CONN_LIMITED;
+        return;
+    }
+
+    if (wa->present) {
+        g_info.active_transport = NET_TRANSPORT_WIFI;
+        g_info.connection_state = net_wifi_state_map(wifi_connection_state());
+        return;
+    }
+
+    g_info.active_transport = NET_TRANSPORT_NONE;
+    g_info.connection_state = NET_CONN_DOWN;
+}
+
 /* ---- Internal: apply DHCP result (called by dhcp.c) ---- */
 void net_apply_dhcp(const uint8_t *ip, const uint8_t *mask,
                     const uint8_t *gw, const uint8_t *dns) {
@@ -61,6 +107,7 @@ void net_apply_dhcp(const uint8_t *ip, const uint8_t *mask,
     mem_copy(g_info.gateway, gw,   4);
     mem_copy(g_info.dns,     dns,  4);
     g_info.dhcp_pending = 0;
+    net_refresh_runtime_state();
 
     serial_write("[net] DHCP bound: ");
     int i;
@@ -101,6 +148,7 @@ void net_init(void) {
     } else {
         g_info.nic_name[0] = '\0';
         serial_write("[net] No NIC found\n");
+        net_refresh_runtime_state();
         return;
     }
 
@@ -112,10 +160,14 @@ void net_init(void) {
     /* Start DHCP */
     g_info.dhcp_pending = 1;
     dhcp_start();
+    net_refresh_runtime_state();
 }
 
 void net_poll(void) {
     int n;
+
+    wifi_poll();
+    net_refresh_runtime_state();
 
     if (g_nic == NIC_NONE) return;
 
@@ -140,10 +192,32 @@ void net_poll(void) {
     }
 
     dhcp_poll();
+    net_refresh_runtime_state();
 }
 
 const net_info_t *net_get_info(void) {
     return &g_info;
+}
+
+const char *net_transport_name(net_transport_t transport) {
+    switch (transport) {
+        case NET_TRANSPORT_WIRED: return "Wired";
+        case NET_TRANSPORT_WIFI: return "Wi-Fi";
+        default: return "None";
+    }
+}
+
+const char *net_connection_state_name(net_connection_state_t state) {
+    switch (state) {
+        case NET_CONN_DISCOVERING: return "Discovering";
+        case NET_CONN_IDLE: return "Idle";
+        case NET_CONN_SCANNING: return "Scanning";
+        case NET_CONN_CONNECTING: return "Connecting";
+        case NET_CONN_CONNECTED: return "Connected";
+        case NET_CONN_LIMITED: return "Limited";
+        case NET_CONN_UNSUPPORTED: return "Unsupported";
+        default: return "Down";
+    }
 }
 
 int net_send_frame(const uint8_t *frame, uint16_t len) {

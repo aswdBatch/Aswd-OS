@@ -10,6 +10,11 @@
 static winconsole_t g_pool[WC_POOL_SIZE];
 static int g_pool_used[WC_POOL_SIZE];
 
+static int wc_font_px(void) {
+    const gfx_display_profile_t *dp = gfx_display_profile();
+    return dp->density == GFX_DENSITY_COMPACT ? 13 : 16;
+}
+
 winconsole_t *wc_alloc(void) {
     for (int i = 0; i < WC_POOL_SIZE; i++) {
         if (!g_pool_used[i]) {
@@ -47,8 +52,16 @@ void wc_init(winconsole_t *wc, int win_id) {
 }
 
 void wc_resize(winconsole_t *wc, int content_w, int content_h) {
-    int cols = content_w / FONT_WIDTH;
-    int rows = content_h / FONT_HEIGHT;
+    int font_px = wc_font_px();
+    int cell_w = gfx_font_char_width(FONT_ROLE_MONO, font_px);
+    int cell_h = gfx_font_line_height(FONT_ROLE_MONO, font_px);
+    int cols;
+    int rows;
+
+    if (cell_w < 1) cell_w = FONT_WIDTH;
+    if (cell_h < 1) cell_h = FONT_HEIGHT;
+    cols = content_w / cell_w;
+    rows = content_h / cell_h;
     if (cols > WC_MAX_COLS) cols = WC_MAX_COLS;
     if (rows > WC_MAX_ROWS) rows = WC_MAX_ROWS;
     if (cols < 1) cols = 1;
@@ -175,6 +188,12 @@ void wc_write(winconsole_t *wc, const char *s) {
 }
 
 void wc_paint(winconsole_t *wc, int px, int py) {
+    int font_px = wc_font_px();
+    int cell_w = gfx_font_char_width(FONT_ROLE_MONO, font_px);
+    int cell_h = gfx_font_line_height(FONT_ROLE_MONO, font_px);
+
+    if (cell_w < 1) cell_w = FONT_WIDTH;
+    if (cell_h < 1) cell_h = FONT_HEIGHT;
     for (int row = 0; row < wc->rows; row++) {
         for (int col = 0; col < wc->cols; col++) {
             int idx = row * WC_MAX_COLS + col;
@@ -182,11 +201,13 @@ void wc_paint(winconsole_t *wc, int px, int py) {
             uint8_t attr = wc->attrs[idx];
             uint8_t fg_idx = attr & 0x0F;
             uint8_t bg_idx = (attr >> 4) & 0x0F;
-            gfx_draw_char(px + col * FONT_WIDTH,
-                          py + row * FONT_HEIGHT,
-                          c,
-                          g_vga_palette[fg_idx],
-                          g_vga_palette[bg_idx]);
+            gfx_draw_char_role(px + col * cell_w,
+                               py + row * cell_h,
+                               c,
+                               FONT_ROLE_MONO,
+                               font_px,
+                               g_vga_palette[fg_idx],
+                               g_vga_palette[bg_idx]);
         }
     }
     wc->dirty = 0;

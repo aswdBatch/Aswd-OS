@@ -5,6 +5,7 @@
 #include "drivers/gfx.h"
 #include "drivers/keyboard.h"
 #include "gui/gui.h"
+#include "gui/theme.h"
 #include "gui/winconsole.h"
 #include "lib/string.h"
 #include "shell/commands.h"
@@ -101,10 +102,19 @@ static void execute_line(void) {
 
 static void shell_gui_on_paint(int win_id) {
     gui_rect_t r = gui_window_content(win_id);
+    const th_metrics_t *tm = th_metrics();
     if (g_wc) {
-        gfx_fill_rect(r.x, r.y, r.w, r.h, gfx_rgb(0, 0, 0));
-        wc_resize(g_wc, r.w, r.h);
-        wc_paint(g_wc, r.x, r.y);
+        int head_h = tm->toolbar_h;
+        int status_h = tm->status_h;
+        int body_y = r.y + head_h;
+        int body_h = r.h - head_h - status_h;
+
+        th_draw_toolbar(r.x, r.y, r.w, "Terminal");
+        th_draw_statusbar(r.x, r.y + r.h - status_h, r.w, status_h,
+                          "AswdOS terminal. Ctrl+Q closes.");
+        gfx_fill_rect(r.x, body_y, r.w, body_h, gfx_rgb(0, 0, 0));
+        wc_resize(g_wc, r.w, body_h);
+        wc_paint(g_wc, r.x, body_y);
     }
 }
 
@@ -205,6 +215,7 @@ void shell_gui_launch(void) {
     gui_window_suggest_rect(720, 500, &rect);
     wid = gui_window_create("Terminal", rect.x, rect.y, rect.w, rect.h);
     if (wid < 0) return;
+    gui_window_set_min_size(wid, 520, 340);
 
     g_wc = wc_alloc();
     if (!g_wc) { gui_window_close(wid); return; }

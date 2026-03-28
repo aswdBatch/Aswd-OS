@@ -33,8 +33,8 @@ typedef struct {
 static const doc_line_t k_docs[] = {
     { DOC_HDR,   "Quick Start" },
     { DOC_TXT,   "Save a file with .ax extension (e.g. /ROOT/HELLO.AX)" },
-    { DOC_TXT,   "Press Run in AX Code toolbar to execute it." },
-    { DOC_TXT,   "Or in the terminal: ax /ROOT/HELLO.AX" },
+    { DOC_TXT,   "Run it from the terminal with: ax /ROOT/HELLO.AX" },
+    { DOC_TXT,   "AX Studio stays separate for visual app building." },
     { DOC_BLANK, "" },
     { DOC_HDR,   "Variables & Types" },
     { DOC_TXT,   "let x = 42          // integer" },

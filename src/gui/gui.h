@@ -4,10 +4,44 @@
 
 #define GUI_MAX_WINDOWS 8
 #define GUI_TITLE_MAX   32
-#define TITLE_BAR_HEIGHT 22
-#define TASKBAR_HEIGHT   28
+
+typedef struct {
+    int title_bar_h;
+    int taskbar_h;
+    int resize_handle;
+    int window_min_w;
+    int window_min_h;
+    int desktop_margin_x;
+    int desktop_margin_y;
+    int desktop_slot_w;
+    int desktop_slot_h;
+    int desktop_gap_x;
+    int desktop_gap_y;
+    int desktop_icon_size;
+    int start_button_w;
+    int start_menu_w;
+    int start_header_h;
+    int start_footer_h;
+    int start_cell_w;
+    int start_cell_h;
+    int search_w;
+    int search_h;
+} gui_shell_metrics_t;
+
+#define TITLE_BAR_HEIGHT (gui_shell_metrics()->title_bar_h)
+#define TASKBAR_HEIGHT   (gui_shell_metrics()->taskbar_h)
 
 typedef struct { int x, y, w, h; } gui_rect_t;
+
+typedef enum {
+    GUI_BG_THEME_MINT = 0,
+    GUI_BG_THEME_GLASS,
+    GUI_BG_THEME_STUDIO,
+    GUI_BG_THEME_SUNSET,
+    GUI_BG_THEME_OCEAN,
+    GUI_BG_THEME_NEUTRAL,
+    GUI_BG_THEME_COUNT
+} gui_background_theme_t;
 
 typedef enum {
     GUI_ICON_TERMINAL = 0,
@@ -23,6 +57,7 @@ typedef enum {
     GUI_ICON_BROWSER,
     GUI_ICON_AXDOCS,
     GUI_ICON_AXSTUDIO,
+    GUI_ICON_WORK180,
 } gui_icon_kind_t;
 
 typedef struct {
@@ -46,9 +81,13 @@ typedef struct {
     int        dragging;
     int        drag_off_x, drag_off_y;
     int        minimized;
+    int        maximized;
     int        resizing;
     int        resize_start_mx, resize_start_my;
     int        resize_orig_w,   resize_orig_h;
+    int        min_w, min_h;
+    gui_rect_t restore_frame;
+    int        close_cancelled;
     void      *state;
     int        icon_kind;   /* GUI_ICON_* or -1 for none */
     void (*on_paint)(int win_id);
@@ -64,9 +103,11 @@ int  gui_window_create(const char *title, int x, int y, int w, int h);
 void gui_window_close(int id);
 void gui_window_set_title(int id, const char *title);
 void gui_window_focus(int id);
+void gui_window_set_min_size(int id, int min_w, int min_h);
 void gui_repaint(void);
 gui_rect_t gui_desktop_bounds(void);
 void gui_window_suggest_rect(int pref_w, int pref_h, gui_rect_t *out);
+const gui_shell_metrics_t *gui_shell_metrics(void);
 
 int gui_window_active(int id);
 const char *gui_window_title(int id);
@@ -82,3 +123,9 @@ void gui_launch_app(int index);
 
 void     gui_set_desktop_color(uint32_t color);
 uint32_t gui_get_desktop_color(void);
+void     gui_set_background_theme(gui_background_theme_t theme);
+gui_background_theme_t gui_get_background_theme(void);
+int      gui_background_theme_count(void);
+const char *gui_background_theme_name(int index);
+uint32_t gui_background_theme_preview_color(int index);
+void     gui_draw_auth_backdrop(void);

@@ -22,3 +22,6 @@ int tcp_connected(void);
 
 /* Called by IP layer on incoming TCP segment */
 void tcp_rx(const uint8_t *src_ip, const uint8_t *pkt, uint16_t len);
+
+/* Check and fire retransmissions of unACKed segments (call from recv loops) */
+void tcp_check_retransmit(void);

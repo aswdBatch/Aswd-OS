@@ -2,9 +2,9 @@
 
 #include "common/colors.h"
 #include "common/config.h"
+#include "common/power.h"
 #include "console/console.h"
 #include "cpu/pic.h"
-#include "cpu/ports.h"
 #include "drivers/keyboard.h"
 #include "drivers/vga.h"
 #include "editor/editor.h"
@@ -289,30 +289,6 @@ static void nav_down(void) {
     else if (g_sel == ITEM_SETTINGS)  g_sel = ITEM_REBOOTUSB;
 }
 
-/* ── Actions ─────────────────────────────────────────────────────────────── */
-
-static void do_shutdown(void) {
-    cpu_cli();
-    /* QEMU ACPI shutdown (port 0x604 for newer QEMU, 0xB004 for older BOCHS) */
-    outw(0x604, 0x2000);
-    outw(0xB004, 0x2000);
-    /* If still running, show a halt message */
-    vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
-    vga_clear();
-    tui_write_at(12, 22, "System halted. You may now power off.",
-                 vga_make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK));
-    for (;;) cpu_hlt();
-}
-
-static void do_reboot(void) {
-    cpu_cli();
-    for (int i = 0; i < 100000; i++) {
-        if (!(inb(0x64) & 0x02u)) break;
-    }
-    outb(0x64, 0xFE);
-    for (;;) cpu_hlt();
-}
-
 static void activate(void) {
     switch (g_sel) {
     case ITEM_TERMINAL:
@@ -334,12 +310,12 @@ static void activate(void) {
         break;
 
     case ITEM_SHUTDOWN:
-        do_shutdown();
+        power_shutdown();
         break;
 
     case ITEM_REBOOT:
     case ITEM_REBOOTUSB:
-        do_reboot();
+        power_reboot();
         break;
     }
 }

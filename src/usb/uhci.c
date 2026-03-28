@@ -5,6 +5,7 @@
 #include "cpu/ports.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
+#include "drivers/serial.h"
 #include "lib/string.h"
 
 /* ---- UHCI I/O register offsets ---- */
@@ -336,9 +337,9 @@ static int find_mouse_endpoint(unsigned ci, uint8_t *out_ep,
         if (len < 2) break;
 
         if (type == 0x04u) {   /* Interface descriptor */
-            in_mouse_iface = (buf[i+5] == 0x03u && /* HID */
-                              buf[i+6] == 0x01u && /* boot */
-                              buf[i+7] == 0x02u);  /* mouse */
+            in_mouse_iface = (buf[i+5] == 0x03u &&                        /* HID */
+                              (buf[i+6] == 0x01u || buf[i+6] == 0x00u) && /* boot or generic */
+                              buf[i+7] == 0x02u);                          /* mouse */
             iface_num = buf[i + 2];
         } else if (type == 0x05u && in_mouse_iface) {  /* Endpoint */
             uint8_t addr   = buf[i + 2];
@@ -373,9 +374,9 @@ static int find_keyboard_endpoint(unsigned ci, uint8_t *out_ep,
         if (len < 2) break;
 
         if (type == 0x04u) {   /* Interface descriptor */
-            in_kbd_iface = (buf[i+5] == 0x03u && /* HID */
-                            buf[i+6] == 0x01u && /* boot */
-                            buf[i+7] == 0x01u);  /* keyboard */
+            in_kbd_iface = (buf[i+5] == 0x03u &&                         /* HID */
+                            (buf[i+6] == 0x01u || buf[i+6] == 0x00u) && /* boot or generic */
+                            buf[i+7] == 0x01u);                          /* keyboard */
             iface_num = buf[i + 2];
         } else if (type == 0x05u && in_kbd_iface) {  /* Endpoint */
             uint8_t addr   = buf[i + 2];
@@ -391,6 +392,31 @@ static int find_keyboard_endpoint(unsigned ci, uint8_t *out_ep,
         i += len;
     }
     return 0;
+}
+
+static void parse_primary_interface(unsigned ci, uint8_t *out_class,
+                                    uint8_t *out_subclass, uint8_t *out_protocol) {
+    uint8_t *buf = g_data[ci];
+    int total = (int)buf[2] | ((int)buf[3] << 8);
+    int i = 0;
+
+    *out_class = 0;
+    *out_subclass = 0;
+    *out_protocol = 0;
+    if (total > 64) total = 64;
+
+    while (i + 8 < total) {
+        uint8_t len  = buf[i];
+        uint8_t type = (len > 1) ? buf[i + 1] : 0;
+        if (len < 2) break;
+        if (type == 0x04u) {
+            *out_class = buf[i + 5];
+            *out_subclass = buf[i + 6];
+            *out_protocol = buf[i + 7];
+            return;
+        }
+        i += len;
+    }
 }
 
 /* ---- Set up interrupt-polling TD and insert into frame list ---- */
@@ -539,6 +565,7 @@ static void process_kb_report(unsigned ci) {
 static int enumerate_port(unsigned ci, uint16_t port_off) {
     uint16_t base  = g_iobase[ci];
     uint8_t  iface = 0;
+    usb_device_t devinfo;
 
     /* Check connection */
     uint16_t psc = reg_r16(base, port_off);
@@ -567,10 +594,25 @@ static int enumerate_port(unsigned ci, uint16_t port_off) {
     /* Read configuration descriptor */
     if (usb_get_config_desc(ci, 1) != 0) return 0;
 
+    mem_set(&devinfo, 0, sizeof(devinfo));
+    devinfo.controller_kind = USB_CTRL_UHCI;
+    devinfo.controller_index = (uint8_t)ci;
+    devinfo.vendor_id = (uint16_t)g_data[ci][8] | ((uint16_t)g_data[ci][9] << 8);
+    devinfo.product_id = (uint16_t)g_data[ci][10] | ((uint16_t)g_data[ci][11] << 8);
+    devinfo.device_class = g_data[ci][4];
+    devinfo.device_subclass = g_data[ci][5];
+    devinfo.device_protocol = g_data[ci][6];
+    devinfo.supports_control = 1;
+    devinfo.supports_interrupt = 1;
+    devinfo.supports_bulk = 0;
+    parse_primary_interface(ci, &devinfo.iface_class, &devinfo.iface_subclass, &devinfo.iface_protocol);
+
     /* Check for HID mouse endpoint */
     uint8_t kb_iface = 0;
     int has_mouse = find_mouse_endpoint(ci, &g_endpt[ci], &g_maxpkt[ci], &iface);
     int has_kbd   = find_keyboard_endpoint(ci, &g_kb_endpt[ci], &g_kb_maxpkt[ci], &kb_iface);
+
+    usb_register_device(&devinfo);
 
     if (!has_mouse && !has_kbd) return 0;
 
@@ -613,6 +655,9 @@ void uhci_attach(usb_controller_t *ctrl) {
     g_iobase[ci]    = base;
     g_active[ci]    = 0;
     g_kb_active[ci] = 0;
+    ctrl->supports_control = 1;
+    ctrl->supports_interrupt = 1;
+    ctrl->supports_bulk = 0;
 
     /* Set up empty frame list */
     unsigned f;
@@ -637,6 +682,11 @@ void uhci_attach(usb_controller_t *ctrl) {
             }
         }
     }
+    if (g_kb_active[ci]) serial_write("[uhci] keyboard enumerated\n");
+    else                  serial_write("[uhci] keyboard NOT found\n");
+    if (g_active[ci])    serial_write("[uhci] mouse enumerated\n");
+    else                  serial_write("[uhci] mouse NOT found\n");
+
     if (started) {
         reg_w16(base, USBCMD, CMD_RS | CMD_MAXP);
     }
@@ -678,6 +728,8 @@ void uhci_poll(usb_controller_t *ctrl) {
             td->ctrl_sts = TD_STS_ACTIVE | TD_STS_CERR(3) | (g_ls[ci] ? TD_STS_LS : 0u);
             td->token    = make_token(PID_IN, g_devaddr[ci], g_endpt[ci],
                                       g_toggle[ci], g_maxpkt[ci]);
+            /* Re-link TD into QH — hardware sets QH.vert=TERM on completion */
+            g_qh[ci][1].vert = td_phys(ci, g_irq_td[ci]);
         }
     }
 
@@ -694,6 +746,8 @@ void uhci_poll(usb_controller_t *ctrl) {
             ktd->ctrl_sts = TD_STS_ACTIVE | TD_STS_CERR(3) | (g_ls[ci] ? TD_STS_LS : 0u);
             ktd->token    = make_token(PID_IN, g_devaddr[ci], g_kb_endpt[ci],
                                        g_kb_toggle[ci], g_kb_maxpkt[ci]);
+            /* Re-link TD into QH — hardware sets QH.vert=TERM on completion */
+            g_qh[ci][2].vert = td_phys(ci, g_kb_irq_td[ci]);
         }
     }
 }

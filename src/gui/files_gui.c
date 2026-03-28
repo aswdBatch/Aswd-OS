@@ -8,24 +8,24 @@
 #include "drivers/gfx.h"
 #include "drivers/keyboard.h"
 #include "fs/vfs.h"
-#include "gui/editor_gui.h"
 #include "gui/gui.h"
 #include "gui/theme.h"
+#include "gui/work_gui.h"
 #include "gui/winconsole.h"
 #include "lib/string.h"
 
 #define FILES_MAX_ENTRIES   64
 #define FILES_HISTORY_MAX   12
 
-#define SIDEBAR_W           132
-#define TOOLBAR_H           34
-#define ADDRESS_H           30
-#define HEADER_H            22
-#define STATUS_H            22
-#define PANEL_PAD           10
+#define SIDEBAR_W           (th_metrics()->sidebar_w)
+#define TOOLBAR_H           (th_metrics()->toolbar_h)
+#define ADDRESS_H           (th_metrics()->field_h + 8)
+#define HEADER_H            (th_metrics()->list_row_h)
+#define STATUS_H            (th_metrics()->status_h)
+#define PANEL_PAD           (th_metrics()->card_pad)
 #define BUTTON_W            62
-#define BUTTON_H            22
-#define ROW_H               (FONT_HEIGHT + 8)
+#define BUTTON_H            (th_metrics()->button_h)
+#define ROW_H               (th_metrics()->list_row_h)
 #define DBLCLICK_TICKS      40u
 
 #define COL_WIN_BG          gfx_rgb(246, 248, 252)
@@ -456,6 +456,7 @@ static void files_open_viewer(const char *name) {
         str_cat(title, name, sizeof(title));
         g_view_win_id = gui_window_create(title, rect.x, rect.y, rect.w, rect.h);
         if (g_view_win_id < 0) return;
+        gui_window_set_min_size(g_view_win_id, 420, 280);
 
         g_view_wc = wc_alloc();
         if (!g_view_wc) {
@@ -512,7 +513,7 @@ static void files_open_selected(void) {
 
     files_join_path(g_path, g_entries[g_selected].name, next_path, sizeof(next_path));
     if (files_name_is_editable(g_entries[g_selected].name)) {
-        editor_gui_open(next_path);
+        work_gui_open(WORK_MODE_DOCS, next_path);
         return;
     }
 
@@ -557,12 +558,14 @@ static void files_delete_selected(void) {
 static void files_draw_button(int x, int y, int w, const char *label, int enabled) {
     uint32_t bg = enabled ? COL_BTN : COL_BTN_DISABLED;
     uint32_t fg = enabled ? COL_TEXT : COL_TEXT_DIM;
-    int text_x = x + (w - (int)str_len(label) * FONT_WIDTH) / 2;
-    int text_y = y + (BUTTON_H - FONT_HEIGHT) / 2;
-
-    gfx_fill_rect(x, y, w, BUTTON_H, COL_BORDER);
-    gfx_fill_rect(x + 1, y + 1, w - 2, BUTTON_H - 2, bg);
-    gfx_draw_string(text_x, text_y, label, fg, bg);
+    if (enabled) {
+        th_draw_button(x, y, w, BUTTON_H, label, 0);
+    } else {
+        gfx_fill_rect(x, y, w, BUTTON_H, COL_BORDER);
+        gfx_fill_rect(x + 1, y + 1, w - 2, BUTTON_H - 2, bg);
+        th_draw_text_center(x, y + (BUTTON_H - th_metrics()->font_body) / 2, w,
+                            label, fg, bg, th_metrics()->font_body);
+    }
 }
 
 static void files_button_rect(int button, int *x, int *y, int *w, int *h) {
@@ -666,6 +669,7 @@ static int files_row_index_from_y(int y) {
 }
 
 static void files_on_paint(int win_id) {
+    const th_metrics_t *tm = th_metrics();
     gui_rect_t r = gui_window_content(win_id);
     int main_x = r.x + SIDEBAR_W;
     int main_w = r.w - SIDEBAR_W;
@@ -680,12 +684,11 @@ static void files_on_paint(int win_id) {
     files_clamp_scroll();
 
     gfx_fill_rect(r.x, r.y, r.w, r.h, COL_WIN_BG);
-    gfx_fill_rect(r.x, r.y, SIDEBAR_W, r.h, COL_SIDEBAR);
+    th_draw_sidebar(r.x, r.y, SIDEBAR_W, r.h, "Folders");
     gfx_fill_rect(main_x, r.y, main_w, r.h, COL_MAIN_BG);
-    gfx_fill_rect(main_x, r.y, main_w, TOOLBAR_H, COL_TOOLBAR);
+    th_draw_toolbar(main_x, r.y, main_w, "Files");
     gfx_fill_rect(main_x, r.y + TOOLBAR_H, main_w, ADDRESS_H, COL_ADDRESS);
-    gfx_fill_rect(main_x, r.y + TOOLBAR_H + ADDRESS_H, main_w, HEADER_H, COL_HEADER);
-    gfx_fill_rect(r.x, r.y + r.h - STATUS_H, r.w, STATUS_H, COL_STATUS);
+    th_draw_table_header(main_x, r.y + TOOLBAR_H + ADDRESS_H, main_w, HEADER_H);
 
     gfx_fill_rect(r.x + SIDEBAR_W - 1, r.y, 1, r.h, COL_BORDER);
     gfx_fill_rect(main_x, r.y + TOOLBAR_H - 1, main_w, 1, COL_BORDER);
@@ -693,7 +696,6 @@ static void files_on_paint(int win_id) {
     gfx_fill_rect(main_x, r.y + TOOLBAR_H + ADDRESS_H + HEADER_H - 1, main_w, 1, COL_BORDER);
     gfx_fill_rect(r.x, r.y + r.h - STATUS_H, r.w, 1, COL_BORDER);
 
-    gfx_draw_string(r.x + 12, r.y + 12, "Folders", COL_TEXT_DIM, COL_SIDEBAR);
     for (int item = 0; item < FILES_NAV_COUNT; item++) {
         int sx;
         int sy;
@@ -711,7 +713,8 @@ static void files_on_paint(int win_id) {
         gfx_fill_rect(sx, sy, sw, sh, bg);
         gfx_fill_rect(sx + 8, sy + 7, 10, 8,
                       item == FILES_NAV_SYSTEM ? COL_FILE : COL_FOLDER);
-        gfx_draw_string(sx + 24, sy + 6, files_nav_label(item), fg, bg);
+        th_draw_text(sx + 24, sy + (sh - tm->font_body) / 2,
+                     files_nav_label(item), fg, bg, tm->font_body);
     }
 
     for (int button = 0; button < FILES_BTN_COUNT; button++) {
@@ -735,12 +738,12 @@ static void files_on_paint(int win_id) {
                   ADDRESS_H - 10, COL_BORDER);
     gfx_fill_rect(main_x + PANEL_PAD + 1, r.y + TOOLBAR_H + 6,
                   main_w - PANEL_PAD * 2 - 2, ADDRESS_H - 12, COL_MAIN_BG);
-    gfx_draw_string(main_x + PANEL_PAD + 10, r.y + TOOLBAR_H + 9,
-                    breadcrumb, COL_TEXT, COL_MAIN_BG);
+    th_draw_text(main_x + PANEL_PAD + 10, r.y + TOOLBAR_H + 9,
+                 breadcrumb, COL_TEXT, COL_MAIN_BG, tm->font_body);
 
-    gfx_draw_string(name_x, r.y + TOOLBAR_H + ADDRESS_H + 5, "Name", COL_TEXT_DIM, COL_HEADER);
-    gfx_draw_string(type_x, r.y + TOOLBAR_H + ADDRESS_H + 5, "Type", COL_TEXT_DIM, COL_HEADER);
-    gfx_draw_string(size_x, r.y + TOOLBAR_H + ADDRESS_H + 5, "Size", COL_TEXT_DIM, COL_HEADER);
+    th_draw_text(name_x, r.y + TOOLBAR_H + ADDRESS_H + 5, "Name", COL_TEXT_DIM, COL_HEADER, tm->font_body);
+    th_draw_text(type_x, r.y + TOOLBAR_H + ADDRESS_H + 5, "Type", COL_TEXT_DIM, COL_HEADER, tm->font_body);
+    th_draw_text(size_x, r.y + TOOLBAR_H + ADDRESS_H + 5, "Size", COL_TEXT_DIM, COL_HEADER, tm->font_body);
 
     for (int i = 0; i < rows && g_scroll + i < g_entry_count; i++) {
         int idx = g_scroll + i;
@@ -753,13 +756,14 @@ static void files_on_paint(int win_id) {
             bg = (i & 1) ? COL_ROW_HOVER : COL_MAIN_BG;
         }
 
-        gfx_fill_rect(main_x + PANEL_PAD, row_y, main_w - PANEL_PAD * 2, ROW_H, bg);
+        th_draw_list_row(main_x + PANEL_PAD, row_y, main_w - PANEL_PAD * 2, ROW_H, "", idx == g_selected);
+        gfx_fill_rect(main_x + PANEL_PAD + 1, row_y + 1, main_w - PANEL_PAD * 2 - 2, ROW_H - 2, bg);
         gfx_fill_rect(name_x - 18, row_y + 6, 12, 10,
                       entry->is_dir ? COL_FOLDER : COL_FILE);
-        gfx_draw_string(name_x, row_y + 4, entry->name, COL_TEXT, bg);
-        gfx_draw_string(type_x, row_y + 4, files_entry_type(entry), COL_TEXT_DIM, bg);
+        th_draw_text(name_x, row_y + 4, entry->name, COL_TEXT, bg, tm->font_body);
+        th_draw_text(type_x, row_y + 4, files_entry_type(entry), COL_TEXT_DIM, bg, tm->font_body);
         files_entry_size(entry, size_buf, sizeof(size_buf));
-        gfx_draw_string(size_x, row_y + 4, size_buf, COL_TEXT_DIM, bg);
+        th_draw_text(size_x, row_y + 4, size_buf, COL_TEXT_DIM, bg, tm->font_body);
     }
 
     status[0] = '\0';
@@ -780,10 +784,12 @@ static void files_on_paint(int win_id) {
         str_cat(status, g_notice, sizeof(status));
     }
 
-    gfx_draw_string(r.x + 10, r.y + r.h - STATUS_H + 4,
-                    status,
-                    files_path_is_writable(g_path) ? COL_OK : COL_WARN,
-                    COL_STATUS);
+    th_draw_statusbar(r.x, r.y + r.h - STATUS_H, r.w, STATUS_H, "");
+    th_draw_text(r.x + 10, r.y + r.h - STATUS_H + (STATUS_H - tm->font_small) / 2,
+                 status,
+                 files_path_is_writable(g_path) ? COL_OK : COL_WARN,
+                 TH_BG_STATUS,
+                 tm->font_small);
 }
 
 static void files_on_key(int win_id, char key) {
@@ -928,6 +934,7 @@ void files_gui_launch(void) {
     gui_window_suggest_rect(760, 470, &rect);
     g_win_id = gui_window_create("Files", rect.x, rect.y, rect.w, rect.h);
     if (g_win_id < 0) return;
+    gui_window_set_min_size(g_win_id, 560, 340);
 
     w = gui_get_window(g_win_id);
     w->icon_kind = GUI_ICON_FILES;

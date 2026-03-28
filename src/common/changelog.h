@@ -1,6 +1,6 @@
 #pragma once
 
-#define CHANGELOG_NOTE_MAX 8
+#define CHANGELOG_NOTE_MAX 13
 
 typedef struct {
     const char *version;

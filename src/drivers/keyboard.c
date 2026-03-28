@@ -7,6 +7,7 @@
 #include "cpu/ports.h"
 #include "drivers/serial.h"
 #include "lib/string.h"
+#include "usb/usb.h"
 
 typedef struct __attribute__((packed)) {
     uint16_t limit;
@@ -29,6 +30,7 @@ static volatile uint8_t g_shift = 0;
 static volatile uint8_t g_ctrl = 0;
 static volatile uint8_t g_e0_pending = 0;
 static volatile uint8_t g_ps2_ready = 0;
+static volatile uint8_t g_polled_fallback_logged = 0;
 
 enum {
     BIOS_KBD_HEAD = 0x041Au,
@@ -274,6 +276,29 @@ static void handle_scancode(uint8_t sc) {
     buf_push(c);
 }
 
+static int poll_controller_scancodes(void) {
+    int saw_data = 0;
+
+    for (int i = 0; i < 32; i++) {
+        uint8_t st = inb(0x64);
+        if (!(st & 0x01u)) {
+            break;
+        }
+        if (st & 0x20u) {
+            break;
+        }
+
+        handle_scancode(inb(0x60));
+        saw_data = 1;
+    }
+
+    if (saw_data && !g_polled_fallback_logged) {
+        g_polled_fallback_logged = 1;
+        kbd_log("using polled PS/2 scancode fallback");
+    }
+    return saw_data;
+}
+
 void keyboard_irq_handler(void) {
     uint8_t st;
     if (!g_ps2_ready) {
@@ -289,7 +314,19 @@ void keyboard_irq_handler(void) {
 }
 
 int keyboard_try_getchar(char *out) {
+    if (!out) {
+        return 0;
+    }
+
     if (buf_pop(out)) return 1;
+
+    /* Keep USB HID keyboards serviced even in polling loops that do not
+       explicitly call usb_poll(), such as the desktop, shell, and dialogs. */
+    usb_poll();
+    if (buf_pop(out)) return 1;
+
+    if (poll_controller_scancodes() && buf_pop(out)) return 1;
+
     if (!g_ps2_ready) {
         if (bios_kbd_trampoline_pop(out)) return 1;
         return bios_kbd_pop(out);
@@ -324,6 +361,7 @@ void keyboard_init(void) {
     g_ctrl = 0;
     g_e0_pending = 0;
     g_ps2_ready = 0;
+    g_polled_fallback_logged = 0;
 
     trampoline_save_gdtr();
     trampoline_copy();

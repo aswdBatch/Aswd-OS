@@ -4,6 +4,7 @@
 
 #include "cpu/ports.h"
 #include "drivers/serial.h"
+#include "lib/string.h"
 
 /* BGA I/O ports */
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
@@ -47,6 +48,12 @@ static void serial_write_hex32(uint32_t val) {
     for (int i = 7; i >= 0; i--)
         buf[2 + (7 - i)] = hex[(val >> (i * 4)) & 0xF];
     buf[10] = '\0';
+    serial_write(buf);
+}
+
+static void serial_write_dec32(uint32_t val) {
+    char buf[16];
+    u32_to_dec(val, buf, sizeof(buf));
     serial_write(buf);
 }
 
@@ -112,8 +119,14 @@ int bga_detect(void) {
     return 1;
 }
 
-int bga_set_mode(uint16_t width, uint16_t height, uint16_t bpp,
-                 uint32_t *out_lfb, uint32_t *out_pitch) {
+int bga_set_mode(uint16_t width, uint16_t height, uint16_t bpp, bga_mode_info_t *out_mode) {
+    bga_mode_info_t mode;
+
+    if (!out_mode) {
+        serial_write("BGA: missing mode out param\n");
+        return 0;
+    }
+
     /* Check VRAM is sufficient */
     uint32_t vram_64k = bga_read(VBE_DISPI_INDEX_VIDEO_MEMORY_64K);
     uint32_t vram_bytes = vram_64k * 65536u;
@@ -152,15 +165,41 @@ int bga_set_mode(uint16_t width, uint16_t height, uint16_t bpp,
         return 0;
     }
 
-    *out_lfb = g_bga_bar0;
-    *out_pitch = (uint32_t)width * (bpp / 8);
+    mode.lfb_addr = g_bga_bar0;
+    mode.xres = bga_read(VBE_DISPI_INDEX_XRES);
+    mode.yres = bga_read(VBE_DISPI_INDEX_YRES);
+    mode.virt_width = bga_read(VBE_DISPI_INDEX_VIRT_WIDTH);
+    mode.virt_height = bga_read(VBE_DISPI_INDEX_VIRT_HEIGHT);
+    mode.bpp = (uint8_t)bga_read(VBE_DISPI_INDEX_BPP);
+    if (mode.virt_width == 0) mode.virt_width = mode.xres;
+    if (mode.virt_height == 0) mode.virt_height = mode.yres;
+    mode.pitch_bytes = (uint32_t)mode.virt_width * (uint32_t)(mode.bpp / 8u);
 
-    serial_write("BGA: mode set ");
-    serial_write_hex32(width);
+    if ((uint32_t)mode.virt_width * (uint32_t)mode.virt_height * (uint32_t)(mode.bpp / 8u) > vram_bytes) {
+        serial_write("BGA: rounded mode exceeds VRAM\n");
+        return 0;
+    }
+
+    *out_mode = mode;
+
+    serial_write("BGA: req ");
+    serial_write_dec32(width);
     serial_write("x");
-    serial_write_hex32(height);
+    serial_write_dec32(height);
+    serial_write("x");
+    serial_write_dec32(bpp);
+    serial_write(" -> act ");
+    serial_write_dec32(mode.xres);
+    serial_write("x");
+    serial_write_dec32(mode.yres);
+    serial_write(" virt ");
+    serial_write_dec32(mode.virt_width);
+    serial_write("x");
+    serial_write_dec32(mode.virt_height);
+    serial_write(" pitch=");
+    serial_write_dec32(mode.pitch_bytes);
     serial_write(" LFB=");
-    serial_write_hex32(g_bga_bar0);
+    serial_write_hex32(mode.lfb_addr);
     serial_write("\n");
     return 1;
 }

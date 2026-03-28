@@ -31,7 +31,7 @@ typedef struct __attribute__((packed)) {
 #define TCP_ACK 0x10u
 
 /* RX ring buffer */
-#define TCP_RX_BUF 4096
+#define TCP_RX_BUF 8192
 
 typedef enum {
     TCP_ST_CLOSED = 0,
@@ -52,6 +52,14 @@ static uint32_t    g_rcv_nxt;   /* next expected from remote */
 static uint8_t  g_rx_buf[TCP_RX_BUF];
 static uint16_t g_rx_head = 0;
 static uint16_t g_rx_tail = 0;
+
+/* Retransmit buffer — one segment at a time */
+#define TCP_RETX_MAX 3
+static uint8_t  g_retx_buf[1460];
+static uint16_t g_retx_len      = 0;
+static uint32_t g_retx_seq      = 0;
+static uint32_t g_retx_deadline = 0;
+static int      g_retx_count    = 0;
 
 static uint16_t rx_avail(void) {
     return (uint16_t)((g_rx_head - g_rx_tail) & (TCP_RX_BUF - 1));
@@ -103,7 +111,7 @@ static int tcp_send_segment(uint8_t flags, const uint8_t *data, uint16_t data_le
     th->ack       = bswap32(g_rcv_nxt);
     th->data_off  = (uint8_t)((TCP_HDR_LEN / 4) << 4);
     th->flags     = flags;
-    th->window    = bswap16(4096);
+    th->window    = bswap16(8192);
     th->checksum  = 0;
     th->urgent    = 0;
 
@@ -111,6 +119,15 @@ static int tcp_send_segment(uint8_t flags, const uint8_t *data, uint16_t data_le
         mem_copy((uint8_t *)th + TCP_HDR_LEN, data, data_len);
 
     th->checksum = tcp_checksum(ni->ip, g_remote_ip, th, tcp_len);
+
+    /* Save segment for potential retransmission (data segments only) */
+    if (data && data_len && data_len <= 1460) {
+        mem_copy(g_retx_buf, data, data_len);
+        g_retx_len      = data_len;
+        g_retx_seq      = g_snd_seq;
+        g_retx_deadline = timer_get_ticks() + 200u; /* 2s */
+        g_retx_count    = 0;
+    }
 
     return ip_send(g_remote_ip, IP_PROTO_TCP, frame, tcp_len);
 }
@@ -155,11 +172,24 @@ void tcp_rx(const uint8_t *src_ip, const uint8_t *pkt, uint16_t len) {
     }
 
     if (g_state == TCP_ST_ESTABLISHED || g_state == TCP_ST_FIN_WAIT) {
+        /* Check if remote ACKed our last sent segment */
+        if ((flags & TCP_ACK) && g_retx_len > 0) {
+            uint32_t ack_num = bswap32(th->ack);
+            if (ack_num >= g_retx_seq + g_retx_len)
+                g_retx_len = 0; /* retransmit buffer consumed */
+        }
         /* Data */
         if (pay_len > 0) {
-            rx_push(payload, pay_len);
-            g_rcv_nxt += pay_len;
-            tcp_send_segment(TCP_ACK, 0, 0);
+            uint32_t seg_seq = bswap32(th->seq);
+            if (seg_seq == g_rcv_nxt) {
+                /* In-order */
+                rx_push(payload, pay_len);
+                g_rcv_nxt += pay_len;
+                tcp_send_segment(TCP_ACK, 0, 0);
+            } else {
+                /* Out-of-order or duplicate: send duplicate ACK */
+                tcp_send_segment(TCP_ACK, 0, 0);
+            }
         }
         /* FIN */
         if (flags & TCP_FIN) {
@@ -251,4 +281,20 @@ void tcp_close(void) {
 
 int tcp_connected(void) {
     return g_state == TCP_ST_ESTABLISHED || g_state == TCP_ST_CLOSE_WAIT;
+}
+
+void tcp_check_retransmit(void) {
+    if (g_retx_len == 0) return;
+    if (g_state != TCP_ST_ESTABLISHED) { g_retx_len = 0; return; }
+    if (timer_get_ticks() < g_retx_deadline) return;
+    if (g_retx_count >= TCP_RETX_MAX) { g_retx_len = 0; return; }
+
+    /* Resend the saved segment at the original sequence number */
+    uint32_t saved_seq = g_snd_seq;
+    g_snd_seq = g_retx_seq;
+    tcp_send_segment(TCP_PSH | TCP_ACK, g_retx_buf, g_retx_len);
+    g_snd_seq = saved_seq;
+
+    g_retx_deadline = timer_get_ticks() + 200u;
+    g_retx_count++;
 }

@@ -2,8 +2,8 @@
 
 #include <stdint.h>
 
-#define WC_MAX_COLS 80
-#define WC_MAX_ROWS 37  /* 600px content / 16px font = 37 rows max */
+#define WC_MAX_COLS 192
+#define WC_MAX_ROWS 64
 
 typedef struct winconsole_t {
     char     cells[WC_MAX_ROWS * WC_MAX_COLS];

@@ -4,13 +4,16 @@
 
 #include "drivers/font.h"
 #include "drivers/gfx.h"
+#include "drivers/mouse.h"
 #include "fs/vfs.h"
 #include "gui/gui.h"
+#include "gui/theme.h"
 #include "lib/string.h"
 
 /* ---- Layout ---- */
 #define FORM_OX   10
 #define FORM_OY   10
+#define SCALE_FP_ONE 1024
 
 /* ---- Colors ---- */
 #define COL_BG          gfx_rgb(230, 235, 242)
@@ -42,6 +45,14 @@ typedef struct {
     char         box_vals[AX_MAX_CTRLS][AX_TEXT_LEN];
     int          box_lens[AX_MAX_CTRLS];
 } axapp_inst_t;
+
+typedef struct {
+    int x;
+    int y;
+    int w;
+    int h;
+    int scale_fp;
+} axapp_form_view_t;
 
 static axapp_inst_t g_inst[AXAPP_MAX];
 
@@ -120,24 +131,125 @@ static void logic_fire(int si, int ttype, int param);
 static void logic_exec(int si, int ni, int *budget);
 static void follow_wire(int si, int from_node, int from_port, int *budget);
 
-static void set_ctrl_text(axapp_inst_t *s, int ci, const char *val) {
-    if (ci < 0 || ci >= AX_MAX_CTRLS) return;
-    str_copy(s->box_vals[ci], val, AX_TEXT_LEN);
+static int scale_pos(int value, int scale_fp) {
+    return (value * scale_fp) / SCALE_FP_ONE;
+}
+
+static int scale_dim(int value, int scale_fp) {
+    int scaled = scale_pos(value, scale_fp);
+    if (scaled < 1) scaled = 1;
+    return scaled;
+}
+
+static void draw_fit_text(int x, int y, int w, const char *text, uint32_t fg, uint32_t bg) {
+    char buf[AX_TEXT_LEN];
+    int max_chars;
+    int i = 0;
+
+    if (w <= 0) return;
+    max_chars = w / FONT_WIDTH;
+    if (max_chars < 1) return;
+    if (max_chars >= AX_TEXT_LEN) max_chars = AX_TEXT_LEN - 1;
+
+    while (text && text[i] && i < max_chars) {
+        buf[i] = text[i];
+        i++;
+    }
+    buf[i] = '\0';
+    gfx_draw_string(x, y, buf, fg, bg);
+}
+
+static void draw_fit_text_center(int x, int y, int w, const char *text, uint32_t fg, uint32_t bg) {
+    char buf[AX_TEXT_LEN];
+    int max_chars;
+    int len = 0;
+    int tx;
+
+    if (w <= 0) return;
+    max_chars = w / FONT_WIDTH;
+    if (max_chars < 1) return;
+    if (max_chars >= AX_TEXT_LEN) max_chars = AX_TEXT_LEN - 1;
+
+    while (text && text[len] && len < max_chars) {
+        buf[len] = text[len];
+        len++;
+    }
+    buf[len] = '\0';
+    tx = x + (w - len * FONT_WIDTH) / 2;
+    if (tx < x) tx = x;
+    gfx_draw_string(tx, y, buf, fg, bg);
+}
+
+static void axapp_form_view(axapp_inst_t *s, const gui_rect_t *cr, axapp_form_view_t *view) {
+    int fw = s->proj.form_w > 0 ? s->proj.form_w : 400;
+    int fh = s->proj.form_h > 0 ? s->proj.form_h : 300;
+    int avail_w = cr->w - FORM_OX * 2;
+    int avail_h = cr->h - FORM_OY * 2;
+
+    if (avail_w < 1) avail_w = 1;
+    if (avail_h < 1) avail_h = 1;
+    th_fit_aspect_rect(cr->x + FORM_OX, cr->y + FORM_OY, avail_w, avail_h,
+                       fw, fh, 0, &view->x, &view->y, &view->w, &view->h);
+    view->scale_fp = (view->w * SCALE_FP_ONE) / fw;
+    if (view->scale_fp > SCALE_FP_ONE) view->scale_fp = SCALE_FP_ONE;
+    if (view->scale_fp < 64) view->scale_fp = 64;
+}
+
+static const char *ctrl_id_prefix(int type) {
+    if (type == AX_CTRL_BUTTON) return "button";
+    if (type == AX_CTRL_LABEL) return "label";
+    if (type == AX_CTRL_TEXTBOX) return "textbox";
+    return "checkbox";
+}
+
+static void ctrl_default_id(ax_ctrl_t *c, int idx) {
+    char num[8];
+    str_copy(c->id, ctrl_id_prefix(c->type), AX_ID_LEN);
+    u32_to_dec((uint32_t)(idx + 1), num, sizeof(num));
+    str_cat(c->id, num, AX_ID_LEN);
+}
+
+static ax_ctrl_t *ctrl_at(axapp_inst_t *s, int scene_idx, int ci) {
+    if (!s) return 0;
+    if (scene_idx < 0 || scene_idx >= s->proj.scene_count) return 0;
+    if (ci < 0 || ci >= AX_MAX_CTRLS) return 0;
+    if (ci >= s->proj.scenes[scene_idx].ctrl_count) return 0;
+    return &s->proj.scenes[scene_idx].ctrls[ci];
+}
+
+static const char *ctrl_runtime_text(axapp_inst_t *s, int scene_idx, int ci) {
+    ax_ctrl_t *c = ctrl_at(s, scene_idx, ci);
+    return c ? c->text : "";
+}
+
+static void sync_textbox_buffer(axapp_inst_t *s, int scene_idx, int ci) {
+    ax_ctrl_t *c = ctrl_at(s, scene_idx, ci);
+    if (!c || c->type != AX_CTRL_TEXTBOX) return;
+    str_copy(s->box_vals[ci], c->text, AX_TEXT_LEN);
     s->box_lens[ci] = (int)str_len(s->box_vals[ci]);
 }
 
-static const char *resolve_val(axapp_inst_t *s, ax_logic_node_t *n) {
+static void set_ctrl_text(axapp_inst_t *s, int scene_idx, int ci, const char *val) {
+    ax_ctrl_t *c = ctrl_at(s, scene_idx, ci);
+    if (!c) return;
+    str_copy(c->text, val, AX_TEXT_LEN);
+    if (c->type == AX_CTRL_TEXTBOX) {
+        sync_textbox_buffer(s, scene_idx, ci);
+    }
+}
+
+static const char *resolve_val(axapp_inst_t *s, int scene_idx, ax_logic_node_t *n) {
     static char rbuf[AX_TEXT_LEN];
     if (n->param[1] == 0) return n->str;
     if (n->param[1] == 1) {
         int ci = n->param[0];
-        if (ci >= 0 && ci < AX_MAX_CTRLS) return s->box_vals[ci];
-        return "";
+        return ctrl_runtime_text(s, scene_idx, ci);
     }
     /* param[1] == 2: evaluate box as expression */
     {
         int ci = n->param[0];
-        const char *expr = (ci >= 0 && ci < AX_MAX_CTRLS) ? s->box_vals[ci] : n->str;
+        const char *expr = ctrl_runtime_text(s, scene_idx, ci);
+        if (!expr[0]) expr = n->str;
         eval_to_str(expr, rbuf, sizeof(rbuf));
         return rbuf;
     }
@@ -167,7 +279,7 @@ static void logic_exec(int si, int ni, int *budget) {
 
     switch ((ln_type_t)n->type) {
     case LN_ACT_SET_TEXT:
-        set_ctrl_text(s, n->param[0], resolve_val(s, n));
+        set_ctrl_text(s, sc, n->param[0], resolve_val(s, sc, n));
         break;
     case LN_ACT_SHOW:
         if (n->param[0] >= 0 && n->param[0] < AX_MAX_CTRLS)
@@ -178,8 +290,11 @@ static void logic_exec(int si, int ni, int *budget) {
             s->visible[sc][n->param[0]] = 0;
         break;
     case LN_ACT_SCENE:
-        if (n->param[0] >= 0 && n->param[0] < s->proj.scene_count)
+        if (n->param[0] >= 0 && n->param[0] < s->proj.scene_count) {
             s->active_scene = n->param[0];
+            s->focused_box = -1;
+            s->pressed_btn = -1;
+        }
         break;
     case LN_ACT_ENABLE:
         if (n->param[0] >= 0 && n->param[0] < AX_MAX_CTRLS)
@@ -191,7 +306,7 @@ static void logic_exec(int si, int ni, int *budget) {
         break;
     case LN_COND_IF_TEXT_EQ: {
         int ci = n->param[0];
-        const char *bv = (ci >= 0 && ci < AX_MAX_CTRLS) ? s->box_vals[ci] : "";
+        const char *bv = ctrl_runtime_text(s, sc, ci);
         int eq = (str_ncmp(bv, n->str, AX_TEXT_LEN) == 0);
         follow_wire(si, ni, eq ? 0 : 1, budget);
         return;
@@ -246,22 +361,17 @@ static void axapp_on_paint(int win_id) {
 
     gui_rect_t cr = gui_window_content(win_id);
     int cx = cr.x, cy = cr.y, cw = cr.w, ch = cr.h;
+    axapp_form_view_t view;
 
     gfx_fill_rect(cx, cy, cw, ch, COL_BG);
 
-    /* Form background */
-    int fw = s->proj.form_w;
-    int fh = s->proj.form_h;
-    if (fw < 1) fw = 400;
-    if (fh < 1) fh = 300;
-    int fox = cx + FORM_OX;
-    int foy = cy + FORM_OY;
-    gfx_fill_rect(fox, foy, fw, fh, COL_FORM_BG);
+    axapp_form_view(s, &cr, &view);
+    gfx_fill_rect(view.x, view.y, view.w, view.h, COL_FORM_BG);
     /* border */
-    gfx_fill_rect(fox, foy, fw, 1, COL_FORM_BDR);
-    gfx_fill_rect(fox, foy + fh - 1, fw, 1, COL_FORM_BDR);
-    gfx_fill_rect(fox, foy, 1, fh, COL_FORM_BDR);
-    gfx_fill_rect(fox + fw - 1, foy, 1, fh, COL_FORM_BDR);
+    gfx_fill_rect(view.x, view.y, view.w, 1, COL_FORM_BDR);
+    gfx_fill_rect(view.x, view.y + view.h - 1, view.w, 1, COL_FORM_BDR);
+    gfx_fill_rect(view.x, view.y, 1, view.h, COL_FORM_BDR);
+    gfx_fill_rect(view.x + view.w - 1, view.y, 1, view.h, COL_FORM_BDR);
 
     int sc = s->active_scene;
     if (sc < 0 || sc >= s->proj.scene_count) return;
@@ -270,15 +380,17 @@ static void axapp_on_paint(int win_id) {
     for (int i = 0; i < scene->ctrl_count; i++) {
         if (!s->visible[sc][i]) continue;
         ax_ctrl_t *c = &scene->ctrls[i];
-        int x = fox + c->x;
-        int y = foy + c->y;
-        int w = c->w;
-        int h = c->h;
+        int x = view.x + scale_pos(c->x, view.scale_fp);
+        int y = view.y + scale_pos(c->y, view.scale_fp);
+        int w = scale_dim(c->w, view.scale_fp);
+        int h = scale_dim(c->h, view.scale_fp);
         int dis = !s->enabled[sc][i];
 
         switch (c->type) {
         case AX_CTRL_LABEL:
-            gfx_draw_string(x, y + (h - FONT_HEIGHT) / 2, c->text, COL_LBL_TXT, COL_FORM_BG);
+            if (h >= FONT_HEIGHT) {
+                draw_fit_text(x, y + (h - FONT_HEIGHT) / 2, w, c->text, COL_LBL_TXT, COL_FORM_BG);
+            }
             break;
 
         case AX_CTRL_BUTTON: {
@@ -290,11 +402,10 @@ static void axapp_on_paint(int win_id) {
             gfx_fill_rect(x, y + h - 1, w, 1, COL_FORM_BDR);
             gfx_fill_rect(x, y, 1, h, COL_FORM_BDR);
             gfx_fill_rect(x + w - 1, y, 1, h, COL_FORM_BDR);
-            /* centered label */
-            int tl = (int)str_len(c->text) * FONT_WIDTH;
-            int tx = x + (w - tl) / 2;
-            int ty = y + (h - FONT_HEIGHT) / 2;
-            gfx_draw_string(tx, ty, c->text, COL_BTN_TXT, bg);
+            if (h >= FONT_HEIGHT + 2) {
+                int ty = y + (h - FONT_HEIGHT) / 2;
+                draw_fit_text_center(x + 2, ty, w - 4, c->text, COL_BTN_TXT, bg);
+            }
             break;
         }
 
@@ -306,16 +417,19 @@ static void axapp_on_paint(int win_id) {
             gfx_fill_rect(x, y, 1, h, bdr);
             gfx_fill_rect(x + w - 1, y, 1, h, bdr);
             int ty2 = y + (h - FONT_HEIGHT) / 2;
-            gfx_draw_string(x + 4, ty2, s->box_vals[i], COL_LBL_TXT, COL_BOX_BG);
-            if (s->focused_box == i) {
-                int cx2 = x + 4 + s->box_lens[i] * FONT_WIDTH;
+            if (h >= FONT_HEIGHT + 2) {
+                draw_fit_text(x + 4, ty2, w - 8, c->text, COL_LBL_TXT, COL_BOX_BG);
+            }
+            if (s->focused_box == i && h >= FONT_HEIGHT + 2) {
+                int cx2 = x + 4 + scale_pos(s->box_lens[i] * FONT_WIDTH, view.scale_fp);
+                if (cx2 > x + w - 2) cx2 = x + w - 2;
                 gfx_fill_rect(cx2, ty2, 1, FONT_HEIGHT, COL_LBL_TXT);
             }
             break;
         }
 
         case AX_CTRL_CHECKBOX: {
-            int bsz = 14;
+            int bsz = scale_dim(14, view.scale_fp);
             int bx = x;
             int by = y + (h - bsz) / 2;
             gfx_fill_rect(bx, by, bsz, bsz, COL_BOX_BG);
@@ -323,14 +437,31 @@ static void axapp_on_paint(int win_id) {
             gfx_fill_rect(bx, by + bsz - 1, bsz, 1, COL_CHK_BDR);
             gfx_fill_rect(bx, by, 1, bsz, COL_CHK_BDR);
             gfx_fill_rect(bx + bsz - 1, by, 1, bsz, COL_CHK_BDR);
-            if (s->checked[i]) {
+            if (s->checked[i] && bsz >= FONT_HEIGHT) {
                 gfx_draw_string(bx + 2, by + (bsz - FONT_HEIGHT) / 2, "x", COL_LBL_TXT, COL_BOX_BG);
             }
-            gfx_draw_string(x + bsz + 4, y + (h - FONT_HEIGHT) / 2, c->text, COL_LBL_TXT, COL_FORM_BG);
+            if (h >= FONT_HEIGHT + 2) {
+                draw_fit_text(x + bsz + 4, y + (h - FONT_HEIGHT) / 2, w - bsz - 6,
+                              c->text, COL_LBL_TXT, COL_FORM_BG);
+            }
             break;
         }
         }
     }
+}
+
+static int axapp_on_tick(int win_id, uint32_t now) {
+    (void)now;
+    for (int i = 0; i < AXAPP_MAX; i++) {
+        if (g_inst[i].active && g_inst[i].win_id == win_id) {
+            if (g_inst[i].pressed_btn >= 0 && !(mouse_buttons() & 0x01u)) {
+                g_inst[i].pressed_btn = -1;
+                return 1;
+            }
+            return 0;
+        }
+    }
+    return 0;
 }
 
 /* ---- on_mouse ---- */
@@ -347,45 +478,49 @@ static void axapp_on_mouse(int win_id, int mx, int my, uint8_t buttons) {
         return;
     }
 
-    gui_rect_t cr = gui_window_content(win_id);
-    int fox = cr.x + FORM_OX;
-    int foy = cr.y + FORM_OY;
-
     int sc = s->active_scene;
     if (sc < 0 || sc >= s->proj.scene_count) return;
     ax_scene_t *scene = &s->proj.scenes[sc];
+    {
+        gui_rect_t cr = gui_window_content(win_id);
+        axapp_form_view_t view;
+        axapp_form_view(s, &cr, &view);
 
-    int hit = 0;
-    for (int i = 0; i < scene->ctrl_count; i++) {
-        if (!s->visible[sc][i]) continue;
-        ax_ctrl_t *c = &scene->ctrls[i];
-        int x = fox + c->x;
-        int y = foy + c->y;
-        if (mx >= x && mx < x + c->w && my >= y && my < y + c->h) {
-            hit = 1;
-            if (!s->enabled[sc][i]) break;
-            switch (c->type) {
-            case AX_CTRL_BUTTON:
-                if (s->pressed_btn != i) {
-                    s->pressed_btn = i;
-                    logic_fire(si, LN_TRIG_CLICK, i);
+        int hit = 0;
+        for (int i = 0; i < scene->ctrl_count; i++) {
+            if (!s->visible[sc][i]) continue;
+            ax_ctrl_t *c = &scene->ctrls[i];
+            int x = view.x - cr.x + scale_pos(c->x, view.scale_fp);
+            int y = view.y - cr.y + scale_pos(c->y, view.scale_fp);
+            int w = scale_dim(c->w, view.scale_fp);
+            int h = scale_dim(c->h, view.scale_fp);
+            if (mx >= x && mx < x + w && my >= y && my < y + h) {
+                hit = 1;
+                if (!s->enabled[sc][i]) break;
+                switch (c->type) {
+                case AX_CTRL_BUTTON:
+                    if (s->pressed_btn != i) {
+                        s->pressed_btn = i;
+                        logic_fire(si, LN_TRIG_CLICK, i);
+                    }
+                    break;
+                case AX_CTRL_TEXTBOX:
+                    s->focused_box = i;
+                    sync_textbox_buffer(s, sc, i);
+                    break;
+                case AX_CTRL_CHECKBOX:
+                    s->checked[i] ^= 1;
+                    logic_fire(si, LN_TRIG_TOGGLE, i);
+                    break;
+                default:
+                    break;
                 }
                 break;
-            case AX_CTRL_TEXTBOX:
-                s->focused_box = i;
-                break;
-            case AX_CTRL_CHECKBOX:
-                s->checked[i] ^= 1;
-                logic_fire(si, LN_TRIG_TOGGLE, i);
-                break;
-            default:
-                break;
             }
-            break;
         }
-    }
-    if (!hit) {
-        s->focused_box = -1;
+        if (!hit) {
+            s->focused_box = -1;
+        }
     }
 }
 
@@ -400,6 +535,11 @@ static void axapp_on_key(int win_id, char key) {
 
     int fb = s->focused_box;
     if (fb < 0 || fb >= AX_MAX_CTRLS) return;
+    ax_ctrl_t *box = ctrl_at(s, s->active_scene, fb);
+    if (!box || box->type != AX_CTRL_TEXTBOX) {
+        s->focused_box = -1;
+        return;
+    }
 
     if (key == '\r' || key == '\n') {
         logic_fire(si, LN_TRIG_SUBMIT, fb);
@@ -408,6 +548,7 @@ static void axapp_on_key(int win_id, char key) {
     if (key == '\b') {
         if (s->box_lens[fb] > 0) {
             s->box_vals[fb][--s->box_lens[fb]] = '\0';
+            str_copy(box->text, s->box_vals[fb], AX_TEXT_LEN);
         }
         return;
     }
@@ -415,6 +556,7 @@ static void axapp_on_key(int win_id, char key) {
         if (s->box_lens[fb] + 1 < AX_TEXT_LEN) {
             s->box_vals[fb][s->box_lens[fb]++] = key;
             s->box_vals[fb][s->box_lens[fb]] = '\0';
+            str_copy(box->text, s->box_vals[fb], AX_TEXT_LEN);
         }
         return;
     }
@@ -445,6 +587,13 @@ static void axapp_launch_slot(int si) {
         s->box_vals[ci][0] = '\0';
         s->box_lens[ci] = 0;
     }
+    for (int sc = 0; sc < s->proj.scene_count; sc++) {
+        for (int ci = 0; ci < s->proj.scenes[sc].ctrl_count; ci++) {
+            if (s->proj.scenes[sc].ctrls[ci].type == AX_CTRL_TEXTBOX) {
+                sync_textbox_buffer(s, sc, ci);
+            }
+        }
+    }
     s->active_scene = 0;
     s->focused_box  = -1;
     s->pressed_btn  = -1;
@@ -464,6 +613,7 @@ static void axapp_launch_slot(int si) {
     s->win_id = wid;
     gui_window_t *w = gui_get_window(wid);
     w->on_paint = axapp_on_paint;
+    w->on_tick  = axapp_on_tick;
     w->on_mouse = axapp_on_mouse;
     w->on_key   = axapp_on_key;
     w->on_close = axapp_on_close;
@@ -567,6 +717,7 @@ static int axapp_parse(ax_project_t *proj) {
     int cur_scene = 0;
 
     /* zero out */
+    mem_set(proj, 0, sizeof(*proj));
     str_copy(proj->title, "App", AX_TITLE_LEN);
     proj->form_w = 400; proj->form_h = 300;
     proj->scene_count = 0;
@@ -603,6 +754,7 @@ static int axapp_parse(ax_project_t *proj) {
             }
         } else if (str_eq(word, "ctrl")) {
             int idx;
+            char cid[AX_ID_LEN];
             p = pp_int(p, &idx);
             p = pp_word(p, word2, sizeof(word2));
             int ctype = ctrl_type_from_str(word2);
@@ -615,6 +767,11 @@ static int axapp_parse(ax_project_t *proj) {
                 p = pp_int(p, &c->w);
                 p = pp_int(p, &c->h);
                 p = pp_quoted(p, c->text, AX_TEXT_LEN);
+                cid[0] = '\0';
+                p = pp_skip(p);
+                if (*p == '"') p = pp_quoted(p, cid, AX_ID_LEN);
+                str_copy(c->id, cid, AX_ID_LEN);
+                if (!c->id[0]) ctrl_default_id(c, idx);
                 if (idx >= proj->scenes[cur_scene].ctrl_count)
                     proj->scenes[cur_scene].ctrl_count = idx + 1;
             }

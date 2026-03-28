@@ -14,12 +14,14 @@ typedef enum {
 #define AX_MAX_SCENES   4
 #define AX_TEXT_LEN    48
 #define AX_TITLE_LEN   32
+#define AX_ID_LEN      16
 #define LN_MAX         48
 #define LW_MAX         96
 
 typedef struct {
     ax_ctrl_type_t type;
     int x, y, w, h;
+    char id[AX_ID_LEN];
     char text[AX_TEXT_LEN];
 } ax_ctrl_t;
 

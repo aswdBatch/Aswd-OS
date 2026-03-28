@@ -325,7 +325,10 @@ int users_needs_setup(void) {
 
 int users_current_is_admin(void) {
     if (!USERS_PERSISTENCE_ENABLED) {
-        return 0;
+        /* When persistence is off, devacc session = admin */
+        return auth_session_active() &&
+               str_ncmp(auth_session_username(), AUTH_DEVACC_NAME,
+                        (uint32_t)str_len(AUTH_DEVACC_NAME) + 1) == 0;
     }
     return g_current_user[0] && g_admin_user[0] && str_eq(g_current_user, g_admin_user);
 }

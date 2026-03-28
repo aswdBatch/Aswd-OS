@@ -34,11 +34,15 @@ C_SOURCES := \
 	src/drivers/bga.c \
 	src/drivers/gfx.c \
 	src/drivers/font.c \
+	src/drivers/icon.c \
 	src/drivers/vtconsole.c \
 	src/drivers/mouse.c \
 	src/drivers/pci.c \
 	src/common/changelog.c \
 	src/common/palette.c \
+	src/common/power.c \
+	src/assets/font_assets.c \
+	src/assets/icon_assets.c \
 	src/gui/appstore_gui.c \
 	src/gui/axdocs_gui.c \
 	src/gui/context_menu.c \
@@ -48,11 +52,13 @@ C_SOURCES := \
 	src/gui/dev_tools.c \
 	src/gui/notes_gui.c \
 	src/gui/osinfo_gui.c \
+	src/gui/permission_gui.c \
 	src/gui/settings_gui.c \
 	src/gui/shell_gui.c \
 	src/gui/snake_gui.c \
 	src/gui/theme.c \
 	src/gui/taskmgr.c \
+	src/gui/work_gui.c \
 	src/gui/winconsole.c \
 	src/editor/editor.c \
 	src/fs/vfs.c \
@@ -89,6 +95,8 @@ C_SOURCES := \
 	src/net/dns.c \
 	src/net/tcp.c \
 	src/net/http.c \
+	src/net/wifi.c \
+	src/net/site_allow.c \
 	src/lang/lang.c \
 	src/lang/lexer.c \
 	src/lang/parser.c \

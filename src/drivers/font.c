@@ -1,6 +1,7 @@
 /* Standard 8x16 VGA ROM font (public domain).
  * 128 ASCII characters, 16 bytes each, MSB = leftmost pixel. */
 
+#include "assets/font_assets.h"
 #include "drivers/font.h"
 
 const uint8_t g_font_8x16[128 * 16] = {
@@ -133,3 +134,116 @@ const uint8_t g_font_8x16[128 * 16] = {
     /* 0x7E '~' */  0x00,0x00,0x76,0xDC,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
     /* 0x7F DEL */  0x00,0x00,0x00,0x00,0x10,0x38,0x6C,0xC6,0xC6,0xFE,0x00,0x00,0x00,0x00,0x00,0x00,
 };
+
+static int font_abs(int v) {
+    return v < 0 ? -v : v;
+}
+
+static const font_asset_face_t *font_find_face(font_role_t role, int pixel_size) {
+    const font_asset_face_t *best = 0;
+    int best_diff = 0x7FFFFFFF;
+
+    for (int i = 0; i < g_font_asset_face_count; i++) {
+        const font_asset_face_t *face = &g_font_asset_faces[i];
+        int diff;
+
+        if (face->role != role) continue;
+        diff = font_abs((int)face->pixel_size - pixel_size);
+        if (!best || diff < best_diff) {
+            best = face;
+            best_diff = diff;
+        }
+    }
+    return best;
+}
+
+int font_get_metrics(font_role_t role, int pixel_size, font_metrics_t *out) {
+    const font_asset_face_t *face;
+
+    if (!out) return 0;
+    if (pixel_size <= 0) pixel_size = FONT_HEIGHT;
+
+    face = font_find_face(role, pixel_size);
+    if (!face) {
+        out->pixel_size = pixel_size;
+        out->line_height = pixel_size;
+        out->ascent = (pixel_size * 3) / 4;
+        out->default_advance = (pixel_size * FONT_WIDTH + FONT_HEIGHT - 1) / FONT_HEIGHT;
+        if (out->default_advance < 1) out->default_advance = 1;
+        return 0;
+    }
+
+    out->pixel_size = face->pixel_size;
+    out->line_height = face->line_height;
+    out->ascent = face->ascent;
+    out->default_advance = face->default_advance;
+    return 1;
+}
+
+int font_lookup_glyph(font_role_t role, int pixel_size, char c, font_glyph_t *out) {
+    const font_asset_face_t *face;
+    const font_asset_glyph_t *glyph;
+    unsigned char uc = (unsigned char)c;
+    int idx;
+
+    if (!out) return 0;
+    if (pixel_size <= 0) pixel_size = FONT_HEIGHT;
+
+    face = font_find_face(role, pixel_size);
+    if (!face) return 0;
+
+    if (uc < 32 || uc > 126) uc = '?';
+    idx = (int)uc - 32;
+    glyph = &face->glyphs[idx];
+
+    out->bitmap = face->bitmap + glyph->bitmap_offset;
+    out->width = glyph->width;
+    out->height = glyph->height;
+    out->bearing_x = glyph->bearing_x;
+    out->bearing_y = glyph->bearing_y;
+    out->advance = glyph->advance;
+    return 1;
+}
+
+int font_measure_text(font_role_t role, int pixel_size, const char *text) {
+    font_glyph_t glyph;
+    font_metrics_t metrics;
+    int line = 0;
+    int best = 0;
+
+    if (!text) return 0;
+
+    font_get_metrics(role, pixel_size, &metrics);
+    for (int i = 0; text[i]; i++) {
+        if (text[i] == '\n') {
+            if (line > best) best = line;
+            line = 0;
+            continue;
+        }
+        if (font_lookup_glyph(role, pixel_size, text[i], &glyph)) {
+            line += glyph.advance;
+        } else {
+            line += metrics.default_advance;
+        }
+    }
+    if (line > best) best = line;
+    return best;
+}
+
+int font_char_advance(font_role_t role, int pixel_size) {
+    font_metrics_t metrics;
+    font_get_metrics(role, pixel_size, &metrics);
+    return metrics.default_advance;
+}
+
+int font_line_height(font_role_t role, int pixel_size) {
+    font_metrics_t metrics;
+    font_get_metrics(role, pixel_size, &metrics);
+    return metrics.line_height;
+}
+
+int font_ascent(font_role_t role, int pixel_size) {
+    font_metrics_t metrics;
+    font_get_metrics(role, pixel_size, &metrics);
+    return metrics.ascent;
+}

@@ -1,0 +1,9 @@
+{
+  "name": "aswd-ui-assets",
+  "private": true,
+  "description": "Dev-only generators for AswdOS UI assets",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "pngjs": "^7.0.0"
+  }
+}

@@ -7,8 +7,8 @@ dd 0x00000007              ; +4  flags: align + meminfo + video
 dd -(0x1BADB002 + 0x00000007)  ; +8  checksum
 dd 0, 0, 0, 0, 0          ; +12..+28  address fields (unused, bit 16 not set)
 dd 0                       ; +32 mode_type: 0 = linear graphics
-dd 800                     ; +36 width
-dd 600                     ; +40 height
+dd 1366                    ; +36 preferred width
+dd 768                     ; +40 preferred height
 dd 32                      ; +44 depth (bpp)
 
 SECTION .bss

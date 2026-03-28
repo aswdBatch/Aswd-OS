@@ -7,6 +7,7 @@
 #include "common/changelog.h"
 #include "common/colors.h"
 #include "common/config.h"
+#include "common/power.h"
 #include "console/console.h"
 #include "lang/lang.h"
 #include "confirm/confirm.h"
@@ -855,34 +856,59 @@ static void print_ip(const uint8_t *ip) {
     }
 }
 
+static int network_has_ip(const net_info_t *ni) {
+    return ni && (ni->ip[0] || ni->ip[1] || ni->ip[2] || ni->ip[3]);
+}
+
+static void print_network_unavailable(const net_info_t *ni) {
+    if (ni && ni->wifi_detected) {
+        console_writeln_colored("Wi-Fi adapter detected, but it is not online yet.",
+                                VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+    } else {
+        console_writeln_colored("No network interface.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    }
+}
+
 static void cmd_ifconfig(int argc, char *argv[]) {
     (void)argc; (void)argv;
     const net_info_t *ni = net_get_info();
-    if (!ni->link_up) {
+    if (!ni->link_up && !ni->wifi_detected) {
         console_writeln_colored("No network interface.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
         return;
     }
-    console_write("NIC:     "); console_writeln(ni->nic_name);
-    console_write("MAC:     ");
-    {
-        int i;
-        static const char hex[] = "0123456789ABCDEF";
-        char mac[3] = {0, 0, 0};
-        for (i = 0; i < 6; i++) {
-            mac[0] = hex[(ni->mac[i] >> 4) & 0xF];
-            mac[1] = hex[ni->mac[i] & 0xF];
-            console_write(mac);
-            if (i < 5) console_write(":");
+    console_write("Transport: "); console_writeln(net_transport_name(ni->active_transport));
+    console_write("State:     "); console_writeln(net_connection_state_name(ni->connection_state));
+    if (ni->link_up) {
+        console_write("NIC:     "); console_writeln(ni->nic_name);
+        console_write("MAC:     ");
+        {
+            int i;
+            static const char hex[] = "0123456789ABCDEF";
+            char mac[3] = {0, 0, 0};
+            for (i = 0; i < 6; i++) {
+                mac[0] = hex[(ni->mac[i] >> 4) & 0xF];
+                mac[1] = hex[ni->mac[i] & 0xF];
+                console_write(mac);
+                if (i < 5) console_write(":");
+            }
+            console_putc('\n');
         }
-        console_putc('\n');
     }
-    if (ni->ip[0] || ni->ip[1] || ni->ip[2] || ni->ip[3]) {
+    if (network_has_ip(ni)) {
         console_write("IP:      "); print_ip(ni->ip);      console_putc('\n');
         console_write("Mask:    "); print_ip(ni->netmask);  console_putc('\n');
         console_write("Gateway: "); print_ip(ni->gateway);  console_putc('\n');
         console_write("DNS:     "); print_ip(ni->dns);      console_putc('\n');
-    } else {
+    } else if (ni->link_up) {
         console_writeln_colored("IP: not configured (DHCP pending)", VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+    }
+    if (ni->wifi_detected) {
+        console_write("Wi-Fi:   "); console_writeln(ni->wifi_name[0] ? ni->wifi_name : "detected");
+        console_write("Wi-Fi backend: ");
+        console_writeln(ni->wifi_backend_ready ? "ready" : "pending");
+        if (ni->wifi_ssid[0]) {
+            console_write("SSID:    "); console_writeln(ni->wifi_ssid);
+        }
     }
 }
 
@@ -890,7 +916,7 @@ static void cmd_ping(int argc, char *argv[]) {
     if (argc < 2) { print_usage("ping", "<ip_address>"); return; }
     const net_info_t *ni = net_get_info();
     if (!ni->link_up) {
-        console_writeln_colored("No network interface.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        print_network_unavailable(ni);
         return;
     }
 
@@ -942,7 +968,7 @@ static void cmd_nslookup(int argc, char *argv[]) {
     if (argc < 2) { print_usage("nslookup", "<hostname>"); return; }
     const net_info_t *ni = net_get_info();
     if (!ni->link_up) {
-        console_writeln_colored("No network interface.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        print_network_unavailable(ni);
         return;
     }
     uint8_t ip[4];
@@ -958,7 +984,7 @@ static void cmd_fetch(int argc, char *argv[]) {
     if (argc < 2) { print_usage("fetch", "<http://url>"); return; }
     const net_info_t *ni = net_get_info();
     if (!ni->link_up) {
-        console_writeln_colored("No network interface.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        print_network_unavailable(ni);
         return;
     }
     console_write("Fetching: "); console_writeln(argv[1]);
@@ -967,7 +993,9 @@ static void cmd_fetch(int argc, char *argv[]) {
     int status = 0;
     int n = http_get(argv[1], body, sizeof(body) - 1, &status);
     if (n < 0) {
-        console_writeln_colored("Fetch failed.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+        console_write("Fetch failed: ");
+        console_writeln_colored(http_error_string(http_last_error()),
+                                VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
         return;
     }
     char code[8]; u32_to_dec((uint32_t)status, code, sizeof(code));
@@ -976,25 +1004,16 @@ static void cmd_fetch(int argc, char *argv[]) {
     console_writeln(body);
 }
 
-static void do_reboot(void) {
-  __asm__ volatile("cli");
-  for (int i = 0; i < 100000; i++) {
-    if (!(inb(0x64) & 0x02u)) break;
-  }
-  outb(0x64, 0xFE);
-  for (;;) __asm__ volatile("hlt");
-}
-
 static void cmd_reboot(int argc, char *argv[]) {
   (void)argc;
   (void)argv;
   console_writeln("Rebooting...");
-  do_reboot();
+  power_reboot();
 }
 
 static void cmd_rebootaswd(int argc, char *argv[]) {
   (void)argc;
   (void)argv;
   console_writeln("Rebooting to Aswd OS...");
-  do_reboot();
+  power_reboot();
 }

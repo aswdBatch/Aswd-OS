@@ -83,11 +83,6 @@ static void kernel_boot_normal(const boot_selection_t *selection) {
   boot_loading_step("Initializing network");
   net_init();
 
-  if (selection->target == BOOT_TARGET_NORMAL_GUI) {
-    boot_loading_step("Starting pointer");
-    mouse_init();
-  }
-
   boot_loading_step("Ready");
   boot_loading_finish();
   kernel_set_bugcheck_style(selection);
@@ -105,6 +100,7 @@ static void kernel_boot_normal(const boot_selection_t *selection) {
   }
 
   if (selection->target == BOOT_TARGET_NORMAL_GUI) {
+    mouse_init();
     for (;;) {
       gui_run();
       auth_gui_run(selection->target);
