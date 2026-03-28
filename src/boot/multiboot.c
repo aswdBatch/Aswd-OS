@@ -37,6 +37,7 @@ static uint32_t g_addr = 0;
 static uint32_t g_mem_lower = 0;
 static uint32_t g_mem_upper = 0;
 static int g_has_mem = 0;
+int multiboot_test_mode = 0;
 
 static int      g_has_fb = 0;
 static uint32_t g_fb_addr = 0;
@@ -63,6 +64,19 @@ void multiboot_init(uint32_t magic, uint32_t addr) {
     g_mem_lower = info->mem_lower;
     g_mem_upper = info->mem_upper;
     g_has_mem = 1;
+  }
+
+  /* Bit 2: cmdline present */
+  multiboot_test_mode = 0;
+  if ((info->flags & 0x4u) && info->cmdline) {
+    const char *cmd = (const char *)(uintptr_t)info->cmdline;
+    /* scan for the word "test" */
+    for (int i = 0; cmd[i]; i++) {
+      if (cmd[i] == 't' && cmd[i+1] == 'e' && cmd[i+2] == 's' && cmd[i+3] == 't') {
+        multiboot_test_mode = 1;
+        break;
+      }
+    }
   }
 
   /* Bit 12: framebuffer info present */

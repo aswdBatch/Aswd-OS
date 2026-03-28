@@ -6,6 +6,7 @@
 #include "drivers/gfx.h"
 #include "gui/gui.h"
 #include "lib/string.h"
+#include "tests/test_runner.h"
 
 /* ---- Layout constants ---- */
 #define CALC_W       260
@@ -295,6 +296,67 @@ static void calc_on_mouse(int win_id, int mx, int my, uint8_t buttons) {
 static void calc_on_close(int win_id) {
     (void)win_id;
     g_win_id = -1;
+}
+
+/* ---- Unit tests (called by the CI test runner) ---- */
+
+void calc_run_tests(void) {
+    /* Reset state before each sequence */
+#define CALC_RESET() do { \
+    g_expr[0] = '\0'; g_expr_len = 0; \
+    g_result[0] = '\0'; g_has_result = 0; g_err = 0; \
+} while (0)
+
+    /* 2 + 2 = 4 */
+    CALC_RESET();
+    calc_press('2'); calc_press('+'); calc_press('2'); calc_press('=');
+    test_assert(!g_err && str_eq(g_result, "4"), "calc: 2+2=4");
+
+    /* 10 * 3 = 30 */
+    CALC_RESET();
+    calc_press('1'); calc_press('0');
+    calc_press('*');
+    calc_press('3');
+    calc_press('=');
+    test_assert(!g_err && str_eq(g_result, "30"), "calc: 10*3=30");
+
+    /* 100 / 4 = 25 */
+    CALC_RESET();
+    calc_press('1'); calc_press('0'); calc_press('0');
+    calc_press('/');
+    calc_press('4');
+    calc_press('=');
+    test_assert(!g_err && str_eq(g_result, "25"), "calc: 100/4=25");
+
+    /* 5 - 9 = -4 */
+    CALC_RESET();
+    calc_press('5'); calc_press('-'); calc_press('9'); calc_press('=');
+    test_assert(!g_err && str_eq(g_result, "-4"), "calc: 5-9=-4");
+
+    /* Parentheses: (2+3)*4 = 20 */
+    CALC_RESET();
+    calc_press('('); calc_press('2'); calc_press('+'); calc_press('3');
+    calc_press(')'); calc_press('*'); calc_press('4'); calc_press('=');
+    test_assert(!g_err && str_eq(g_result, "20"), "calc: (2+3)*4=20");
+
+    /* Division by zero sets error */
+    CALC_RESET();
+    calc_press('5'); calc_press('/'); calc_press('0'); calc_press('=');
+    test_assert(g_err, "calc: div-by-zero is error");
+
+    /* Clear resets expression */
+    CALC_RESET();
+    calc_press('9'); calc_press('9');
+    calc_press('C');
+    test_assert(g_expr_len == 0 && !g_has_result, "calc: clear resets");
+
+    /* Backspace removes last char */
+    CALC_RESET();
+    calc_press('1'); calc_press('2'); calc_press('3');
+    calc_press('\b');
+    test_assert(str_eq(g_expr, "12"), "calc: backspace");
+
+#undef CALC_RESET
 }
 
 void calc_gui_launch(void) {

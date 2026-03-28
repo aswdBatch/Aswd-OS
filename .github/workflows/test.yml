@@ -1,0 +1,84 @@
+name: OS Unit Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Toolchain ──────────────────────────────────────────────────────────
+      - name: Cache i686-elf toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: /opt/i686-elf
+          key: i686-elf-tools-13.2.0
+
+      - name: Install i686-elf cross-compiler
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          wget -q https://github.com/lordmilko/i686-elf-tools/releases/download/13.2.0/i686-elf-tools-linux.zip
+          unzip -q i686-elf-tools-linux.zip -d /opt/i686-elf
+          rm i686-elf-tools-linux.zip
+
+      - name: Add toolchain to PATH
+        run: echo "/opt/i686-elf/bin" >> $GITHUB_PATH
+
+      # ── System packages ───────────────────────────────────────────────────
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            nasm \
+            qemu-system-x86 \
+            grub-pc-bin \
+            grub-common \
+            xorriso \
+            mtools
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build kernel
+        run: make
+
+      - name: Build test ISO
+        run: make test-iso
+
+      # ── Prepare test disk (FAT32, with /ROOT directory) ───────────────────
+      - name: Create FAT32 test disk
+        run: |
+          dd if=/dev/zero of=dist/test-disk.img bs=1M count=8 status=none
+          mformat -F -i dist/test-disk.img ::
+          mmd -i dist/test-disk.img ::/ROOT
+
+      # ── Run tests in QEMU ─────────────────────────────────────────────────
+      - name: Run OS tests in QEMU
+        run: |
+          set -o pipefail
+          timeout 60 qemu-system-i386 \
+            -cdrom dist/aswd-test.iso \
+            -drive file=dist/test-disk.img,format=raw,if=ide \
+            -nographic \
+            -serial stdio \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+            -m 256M \
+            2>/dev/null | tee test-output.txt; QEMU_EXIT=${PIPESTATUS[0]}
+          echo "QEMU exit code: $QEMU_EXIT"
+          # Exit code 1 = outb(0xf4, 0) => all tests passed
+          # Exit code 3 = outb(0xf4, 1) => one or more failures
+          [ "$QEMU_EXIT" -eq 1 ]
+
+      # ── Always upload the serial log ──────────────────────────────────────
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: test-output.txt

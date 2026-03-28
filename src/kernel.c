@@ -23,6 +23,7 @@
 #include "gui/gui.h"
 #include "shell/shell.h"
 #include "net/net.h"
+#include "tests/test_runner.h"
 #include "usb/usb.h"
 #include "users/users.h"
 
@@ -122,6 +123,15 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_addr) {
   vga_init();
   vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
   console_init();
+
+  if (multiboot_test_mode) {
+    serial_write("[ASWD CI] Test mode detected.\r\n");
+    kernel_init_storage(0);
+    timer_init(100);
+    keyboard_init();
+    cpu_sti();
+    tests_run_all();   /* does not return */
+  }
 
   boot_selection_t selection;
   boot_launcher_run(&selection);

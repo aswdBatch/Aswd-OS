@@ -4,6 +4,18 @@ static const changelog_entry_t g_entries[] = {
     {
         "v0.8",
         "2026-03-28",
+        "Automated CI test harness with GitHub Actions.",
+        {
+            "Added a GitHub Actions workflow that builds the OS on every push and pull request, boots it headlessly in QEMU, and runs a suite of unit tests via the serial port.",
+            "Kernel now detects a 'test' multiboot command-line argument and enters a headless test mode that skips the GUI entirely.",
+            "Test suite covers: string library (str_len, str_copy, str_cat, str_ncmp, mem_copy, mem_set, u32_to_dec, split_args), shell command dispatch, VFS read/write/delete round-trips, the Ax interpreter, the Calculator evaluator, and the 180 Work document/sheet/slide data model.",
+            "Tests output [PASS]/[FAIL] lines to COM1 serial and exit QEMU via the ISA debug-exit port so CI can check the process exit code.",
+        },
+        4,
+    },
+    {
+        "v0.8",
+        "2026-03-28",
         "Boot no longer probes Wi-Fi hardware before the desktop is reachable.",
         {
             "Moved the new Wi-Fi manager off the early boot path so real hardware no longer risks crashing or bouncing back to PXE-style fallback before login.",

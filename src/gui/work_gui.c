@@ -11,6 +11,7 @@
 #include "gui/gui.h"
 #include "gui/theme.h"
 #include "lib/string.h"
+#include "tests/test_runner.h"
 
 #define WORK_HDR_H            (th_metrics()->toolbar_h + 4)
 #define WORK_SUBBAR_H         (th_metrics()->toolbar_h - 8)
@@ -2266,4 +2267,74 @@ void work_gui_open(work_mode_t mode, const char *path) {
 
 void work_gui_launch(void) {
     work_gui_open(WORK_MODE_HOME, 0);
+}
+
+/* ---- Unit tests (called by the CI test runner) ---- */
+
+void work_run_tests(void) {
+    int val, err;
+
+    /* ---- Docs ---- */
+    docs_reset_new();
+    /* After reset there should be 2 default blocks (Title + Body) */
+    test_assert(g_doc_block_count == 2, "work docs: reset block count");
+    test_assert(g_doc_blocks[0].type == DOC_BLOCK_TITLE, "work docs: block[0] is title");
+    test_assert(g_doc_blocks[1].type == DOC_BLOCK_BODY,  "work docs: block[1] is body");
+
+    /* Insert an extra block */
+    docs_insert_block(2, DOC_BLOCK_BULLET);
+    test_assert(g_doc_block_count == 3, "work docs: insert block");
+    test_assert(g_doc_blocks[2].type == DOC_BLOCK_BULLET, "work docs: inserted block type");
+
+    /* Write text into block 0 by direct assignment */
+    str_copy(g_doc_blocks[0].text, "CI Title", sizeof(g_doc_blocks[0].text));
+    g_doc_blocks[0].len = (uint16_t)str_len(g_doc_blocks[0].text);
+    test_assert(str_eq(g_doc_blocks[0].text, "CI Title"), "work docs: block text");
+
+    /* Delete the bullet block we inserted */
+    docs_delete_block(2);
+    test_assert(g_doc_block_count == 2, "work docs: delete block");
+
+    /* ---- Sheets ---- */
+    sheets_reset();
+    /* Plain integer in a cell */
+    str_copy(g_sheet_cells[0][0].raw, "42", sizeof(g_sheet_cells[0][0].raw));
+    val = 0; err = 0;
+    sheet_eval_cell(0, 0, &val, &err);
+    test_assert(err == 0 && val == 42, "work sheet: plain integer cell");
+
+    /* Formula cell */
+    str_copy(g_sheet_cells[0][1].raw, "=10+5", sizeof(g_sheet_cells[0][1].raw));
+    val = 0; err = 0;
+    sheet_eval_cell(0, 1, &val, &err);
+    test_assert(err == 0 && val == 15, "work sheet: formula =10+5");
+
+    /* Cell referencing another cell: A2 references A1 which is 42 */
+    /* Reset eval state so sheet_eval_cell re-evaluates */
+    g_sheet_cells[0][0].eval_state = 0;
+    str_copy(g_sheet_cells[1][0].raw, "=A1", sizeof(g_sheet_cells[1][0].raw));
+    val = 0; err = 0;
+    sheet_eval_cell(1, 0, &val, &err);
+    test_assert(err == 0 && val == 42, "work sheet: cell reference =A1");
+
+    /* Empty cell evaluates to 0 without error */
+    val = 99; err = 99;
+    sheet_eval_cell(5, 5, &val, &err);
+    test_assert(err == 0 && val == 0, "work sheet: empty cell = 0");
+
+    /* ---- Slides ---- */
+    slides_reset();
+    test_assert(g_slide_count == 1, "work slides: reset count");
+    test_assert(g_slides[0].elem_count == 0, "work slides: empty slide");
+
+    /* Add a text element directly */
+    g_slide_index = 0;
+    slide_add_element(SLIDE_ELEM_TEXT);
+    test_assert(g_slides[0].elem_count == 1, "work slides: add text element");
+    test_assert(g_slides[0].elems[0].type == SLIDE_ELEM_TEXT, "work slides: element type");
+
+    /* Add a rect element */
+    slide_add_element(SLIDE_ELEM_RECT);
+    test_assert(g_slides[0].elem_count == 2, "work slides: add rect element");
+    test_assert(g_slides[0].elems[1].type == SLIDE_ELEM_RECT, "work slides: rect type");
 }

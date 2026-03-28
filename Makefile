@@ -102,7 +102,12 @@ C_SOURCES := \
 	src/lang/parser.c \
 	src/lang/eval.c \
 	src/gui/axstudio_gui.c \
-	src/gui/axapp_gui.c
+	src/gui/axapp_gui.c \
+	src/tests/test_runner.c \
+	src/tests/test_string.c \
+	src/tests/test_shell.c \
+	src/tests/test_fs.c \
+	src/tests/test_ax.c
 
 COMMON_ASM_SOURCES := \
 	src/boot/gdt.asm \
@@ -120,7 +125,7 @@ OBJ_GRUB := $(GRUB_ASM_SOURCES:src/%.asm=$(OBJDIR)/%.o)
 OBJ_BIOS := $(BIOS_ASM_SOURCES:src/%.asm=$(OBJDIR)/%.o)
 OBJ_TRAMPOLINE := $(OBJDIR)/usbboot/trampoline.o
 
-.PHONY: all iso run run-serial run-vga run-usb run-usb-debug clean usb usb-img
+.PHONY: all iso test-iso run run-serial run-vga run-usb run-usb-debug clean usb usb-img
 
 all: iso
 
@@ -185,6 +190,12 @@ run-usb: dist/aswd-usb.img
 run-usb-debug: dist/aswd-usb.img
 	qemu-system-i386 -drive file=dist/aswd-usb.img,format=raw,if=ide \
 	    -m 64M -serial stdio -debugcon file:dbg.log
+
+test-iso: dist/kernel.elf grub-test.cfg
+	@mkdir -p dist/isodir/boot/grub
+	@cp dist/kernel.elf dist/isodir/boot/kernel.elf
+	@cp grub-test.cfg dist/isodir/boot/grub/grub.cfg
+	grub-mkrescue -o dist/aswd-test.iso dist/isodir 2>/dev/null
 
 clean:
 	@cmd /c "if exist $(OBJDIR) rmdir /s /q $(OBJDIR) & if exist dist rmdir /s /q dist"
