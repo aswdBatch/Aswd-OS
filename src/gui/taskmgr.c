@@ -76,7 +76,9 @@ static void taskmgr_on_paint(int win_id) {
     gui_rect_t list = taskmgr_list_rect();
     char line[64];
     char tmp[16];
+    char fps[32];
     char summary[96];
+    gfx_frame_stats_t fs;
     int rows = gui_window_count();
     int visible = taskmgr_visible_rows();
     int card_w;
@@ -105,8 +107,16 @@ static void taskmgr_on_paint(int win_id) {
     u32_to_dec(timer_uptime_secs(), tmp, sizeof(tmp));
     str_cat(summary, tmp, sizeof(summary));
     str_cat(summary, "s uptime", sizeof(summary));
+    gfx_get_frame_stats(&fs);
+    fps[0] = '\0';
+    str_copy(fps, "FPS ", sizeof(fps));
+    u32_to_dec(fs.fps, tmp, sizeof(tmp));
+    str_cat(fps, tmp, sizeof(fps));
+    str_cat(fps, "  rect ", sizeof(fps));
+    u32_to_dec(fs.rect_presents, tmp, sizeof(tmp));
+    str_cat(fps, tmp, sizeof(fps));
     th_draw_info_strip(r.x + 8, header_y + tm->header_h + tm->gap_md, r.w - 16,
-                       line, summary, "Live view");
+                       line, summary, fps);
 
     card_w = cards_three ? (r.w - 36) / 3 : (r.w - 34) / 2;
     card_y = header_y + tm->header_h + tm->gap_md + tm->font_body + tm->gap_md + 18;

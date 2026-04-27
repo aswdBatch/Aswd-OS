@@ -37,6 +37,33 @@ static void th_draw_text_center_overlay(int x, int y, int w, const char *text, u
     th_draw_text_overlay(tx, y, text, fg, font_px);
 }
 
+static int th_is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\r';
+}
+
+static void th_fit_line(char *dst, int dst_size, const char *src, int width, int font_px) {
+    int i;
+
+    if (!dst || dst_size < 2) return;
+    dst[0] = '\0';
+    if (!src) return;
+
+    for (i = 0; src[i] && i + 1 < dst_size; i++) {
+        char trial[192];
+        int k;
+
+        for (k = 0; k < i + 1 && k + 1 < (int)sizeof(trial); k++) {
+            trial[k] = src[k];
+        }
+        trial[k] = '\0';
+        if (th_text_width(trial, font_px) > width) {
+            break;
+        }
+        dst[i] = src[i];
+        dst[i + 1] = '\0';
+    }
+}
+
 static void th_ensure_metrics(void) {
     const gfx_display_profile_t *dp = gfx_display_profile();
 
@@ -224,6 +251,153 @@ void th_draw_text_center(int x, int y, int w, const char *text, uint32_t fg, uin
     tx = x + (w - tw) / 2;
     if (tx < x) tx = x;
     th_draw_text(tx, y, text, fg, bg, font_px);
+}
+
+int th_measure_wrapped_height(const char *text, int width, int font_px, int max_lines) {
+    char line[192];
+    int len = 0;
+    int lines = 0;
+    int line_h;
+    const char *p = text ? text : "";
+
+    if (font_px <= 0) font_px = th_metrics()->font_body;
+    if (width < 8) width = 8;
+    if (max_lines <= 0) max_lines = 1024;
+    line_h = gfx_font_line_height(FONT_ROLE_UI, font_px);
+    if (line_h < 1) line_h = font_px;
+
+    while (*p && lines < max_lines) {
+        if (*p == '\n') {
+            lines++;
+            len = 0;
+            p++;
+            continue;
+        }
+
+        if (th_is_space(*p)) {
+            if (len > 0 && len + 1 < (int)sizeof(line)) {
+                line[len++] = ' ';
+                line[len] = '\0';
+            }
+            p++;
+            continue;
+        }
+
+        {
+            char word[96];
+            int wl = 0;
+            while (*p && !th_is_space(*p) && *p != '\n' && wl + 1 < (int)sizeof(word)) {
+                word[wl++] = *p++;
+            }
+            word[wl] = '\0';
+
+            if (len == 0) {
+                th_fit_line(line, sizeof(line), word, width, font_px);
+                len = (int)str_len(line);
+            } else {
+                char trial[192];
+                str_copy(trial, line, sizeof(trial));
+                str_cat(trial, " ", sizeof(trial));
+                str_cat(trial, word, sizeof(trial));
+                if (th_text_width(trial, font_px) > width) {
+                    lines++;
+                    th_fit_line(line, sizeof(line), word, width, font_px);
+                    len = (int)str_len(line);
+                } else {
+                    str_copy(line, trial, sizeof(line));
+                    len = (int)str_len(line);
+                }
+            }
+        }
+    }
+
+    if (len > 0 && lines < max_lines) lines++;
+    if (lines < 1) lines = 1;
+    return lines * line_h;
+}
+
+int th_draw_text_box(int x, int y, int w, int h, const char *text,
+                     uint32_t fg, uint32_t bg, int font_px, int max_lines, int center) {
+    char line[192];
+    int len = 0;
+    int drawn = 0;
+    int line_h;
+    int y_cursor = y;
+    int y_limit = y + h;
+    const char *p = text ? text : "";
+
+    if (font_px <= 0) font_px = th_metrics()->font_body;
+    if (w < 8 || h < 1) return 0;
+    if (max_lines <= 0) max_lines = 1024;
+    line_h = gfx_font_line_height(FONT_ROLE_UI, font_px);
+    if (line_h < 1) line_h = font_px;
+
+    while (*p && drawn < max_lines && y_cursor + line_h <= y_limit) {
+        if (*p == '\n') {
+            if (len > 0) {
+                line[len] = '\0';
+                if (center) th_draw_text_center(x, y_cursor, w, line, fg, bg, font_px);
+                else th_draw_text(x, y_cursor, line, fg, bg, font_px);
+                y_cursor += line_h;
+                drawn++;
+            } else {
+                y_cursor += line_h;
+                drawn++;
+            }
+            len = 0;
+            p++;
+            continue;
+        }
+
+        if (th_is_space(*p)) {
+            if (len > 0 && len + 1 < (int)sizeof(line)) {
+                line[len++] = ' ';
+            }
+            p++;
+            continue;
+        }
+
+        {
+            char word[96];
+            int wl = 0;
+            while (*p && !th_is_space(*p) && *p != '\n' && wl + 1 < (int)sizeof(word)) {
+                word[wl++] = *p++;
+            }
+            word[wl] = '\0';
+
+            if (len == 0) {
+                th_fit_line(line, sizeof(line), word, w, font_px);
+                len = (int)str_len(line);
+            } else {
+                char trial[192];
+                str_copy(trial, line, sizeof(trial));
+                str_cat(trial, " ", sizeof(trial));
+                str_cat(trial, word, sizeof(trial));
+                if (th_text_width(trial, font_px) > w) {
+                    line[len] = '\0';
+                    if (center) th_draw_text_center(x, y_cursor, w, line, fg, bg, font_px);
+                    else th_draw_text(x, y_cursor, line, fg, bg, font_px);
+                    y_cursor += line_h;
+                    drawn++;
+                    if (drawn >= max_lines || y_cursor + line_h > y_limit) break;
+                    th_fit_line(line, sizeof(line), word, w, font_px);
+                    len = (int)str_len(line);
+                } else {
+                    str_copy(line, trial, sizeof(line));
+                    len = (int)str_len(line);
+                }
+            }
+        }
+    }
+
+    if (len > 0 && drawn < max_lines && y_cursor + line_h <= y_limit) {
+        line[len] = '\0';
+        if (center) th_draw_text_center(x, y_cursor, w, line, fg, bg, font_px);
+        else th_draw_text(x, y_cursor, line, fg, bg, font_px);
+        drawn++;
+    }
+
+    return drawn;
 }
 
 int th_fit_aspect_rect(int outer_x, int outer_y, int outer_w, int outer_h,
@@ -423,15 +597,17 @@ void th_draw_statusbar(int x, int y, int w, int h, const char *text) {
 
 void th_draw_tab(int x, int y, int w, int h, const char *label, int active) {
     const th_metrics_t *m = th_metrics();
-    uint32_t top = active ? gfx_rgb(88, 155, 255) : gfx_rgb(233, 239, 247);
-    uint32_t bottom = active ? TH_ACCENT_HOT : gfx_rgb(210, 220, 235);
+    uint32_t top = active ? gfx_rgb(49, 120, 214) : gfx_rgb(232, 237, 244);
+    uint32_t bottom = active ? gfx_rgb(37, 99, 180) : gfx_rgb(222, 229, 238);
     uint32_t fg = active ? TH_TEXT_INVERT : TH_TEXT;
     int th = h > 0 ? h : m->tab_h;
 
-    gfx_fill_rect(x, y, w, th, active ? TH_ACCENT_DARK : TH_RULE);
+    gfx_fill_rect(x, y, w, th, active ? gfx_rgb(24, 77, 146) : TH_RULE);
     gfx_fill_rect_gradient_v(x + 1, y + 1, w - 2, th - 2, top, bottom);
-    gfx_fill_rect_alpha(x + 1, y + 1, w - 2, 1, gfx_rgb(255, 255, 255), active ? 100 : 56);
-    th_draw_text_center_overlay(x, y + (th - m->font_body) / 2, w, label, fg, m->font_body);
+    gfx_fill_rect_alpha(x + 1, y + 1, w - 2, 1, gfx_rgb(255, 255, 255), active ? 70 : 40);
+    th_draw_text_box(x + m->gap_sm, y + (th - m->font_body) / 2,
+                     w - m->gap_sm * 2, m->font_body + 2, label,
+                     fg, bottom, m->font_body, 1, 1);
 }
 
 void th_draw_list_row(int x, int y, int w, int h, const char *text, int selected) {
@@ -446,23 +622,26 @@ void th_draw_list_row(int x, int y, int w, int h, const char *text, int selected
     }
     gfx_fill_rect(x, y + rh - 1, w, 1, selected ? TH_ACCENT_HOT : TH_RULE);
     if (text && text[0]) {
-        th_draw_text(x + m->gap_md, y + (rh - m->font_body) / 2, text, fg, bg, m->font_body);
+        th_draw_text_box(x + m->gap_md, y + m->gap_xs,
+                         w - m->gap_md * 2, rh - m->gap_xs * 2,
+                         text, fg, bg, m->font_body, 2, 0);
     }
 }
 
 void th_draw_button(int x, int y, int w, int h, const char *label, int hot) {
     const th_metrics_t *m = th_metrics();
-    uint32_t top = hot ? gfx_rgb(97, 163, 255) : gfx_rgb(57, 134, 229);
-    uint32_t bottom = hot ? TH_ACCENT_HOT : TH_ACCENT;
+    uint32_t top = hot ? gfx_rgb(66, 137, 232) : gfx_rgb(48, 117, 208);
+    uint32_t bottom = hot ? gfx_rgb(47, 113, 204) : gfx_rgb(39, 96, 176);
     int bh = h > 0 ? h : m->button_h;
 
-    th_shadow_box(x, y, w, bh);
-    gfx_fill_rect(x, y, w, bh, TH_ACCENT_DARK);
+    gfx_fill_rect_alpha(x + 1, y + 1, w, bh, gfx_rgb(13, 20, 34), 18);
+    gfx_fill_rect(x, y, w, bh, gfx_rgb(28, 77, 146));
     gfx_fill_rect_gradient_v(x + 1, y + 1, w - 2, bh - 2, top, bottom);
-    gfx_fill_rect_alpha(x + 1, y + 1, w - 2, bh / 2, gfx_rgb(255, 255, 255), 34);
+    gfx_fill_rect_alpha(x + 1, y + 1, w - 2, 1, gfx_rgb(255, 255, 255), 36);
     if (label && label[0]) {
-        th_draw_text_center_overlay(x, y + (bh - m->font_body) / 2, w,
-                                    label, TH_TEXT_INVERT, m->font_body);
+        th_draw_text_box(x + m->gap_sm, y + (bh - m->font_body) / 2,
+                         w - m->gap_sm * 2, m->font_body + 2, label,
+                         TH_TEXT_INVERT, bottom, m->font_body, 1, 1);
     }
 }
 
@@ -472,8 +651,9 @@ void th_draw_section_header(int x, int y, int w, const char *label, uint32_t bg)
 
     gfx_fill_rect(x, y, w, hh, bg);
     if (label && label[0]) {
-        th_draw_text(x + m->gap_sm, y + (hh - m->font_body) / 2,
-                     label, TH_TEXT_INVERT, bg, m->font_body);
+        th_draw_text_box(x + m->gap_sm, y + (hh - m->font_body) / 2,
+                         w - m->gap_sm * 2, m->font_body + 2, label,
+                         TH_TEXT_INVERT, bg, m->font_body, 1, 0);
     }
 }
 

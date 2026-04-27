@@ -7,12 +7,14 @@
 #include "drivers/bga.h"
 #include "drivers/font.h"
 #include "drivers/serial.h"
+#include "cpu/timer.h"
 #include "lib/string.h"
 
 enum {
     GFX_MAX_W = 1600,
     GFX_MAX_H = 900,
     GFX_SCALE_FP_ONE = 1024,
+    GFX_MAX_DIRTY_RECTS = 96,
 };
 
 typedef struct {
@@ -26,6 +28,22 @@ static uint32_t *g_lfb;
 static uint16_t g_width, g_height, g_pitch;
 static gfx_mode_t g_mode = GFX_MODE_TEXT;
 static gfx_display_profile_t g_profile;
+static int g_partial_present = 1;
+
+typedef struct {
+    int x;
+    int y;
+    int w;
+    int h;
+} gfx_rect_t;
+
+static gfx_rect_t g_dirty_rects[GFX_MAX_DIRTY_RECTS];
+static int g_dirty_count = 0;
+
+static gfx_frame_stats_t g_stats;
+static uint32_t g_fps_window_tick = 0;
+static uint32_t g_fps_window_frames = 0;
+static uint32_t g_frame_start_tick = 0;
 
 static const gfx_mode_pref_t g_mode_chain[] = {
     { 1366, 768 },
@@ -37,6 +55,29 @@ static const gfx_mode_pref_t g_mode_chain[] = {
 
 static int gfx_abs32(int v) {
     return v < 0 ? -v : v;
+}
+
+static int gfx_rects_overlap_or_touch(const gfx_rect_t *a, const gfx_rect_t *b) {
+    if (!a || !b) return 0;
+    return !(a->x + a->w < b->x || b->x + b->w < a->x ||
+             a->y + a->h < b->y || b->y + b->h < a->y);
+}
+
+static void gfx_rect_union(gfx_rect_t *dst, const gfx_rect_t *src) {
+    int x1;
+    int y1;
+    int x2;
+    int y2;
+
+    if (!dst || !src) return;
+    x1 = dst->x < src->x ? dst->x : src->x;
+    y1 = dst->y < src->y ? dst->y : src->y;
+    x2 = (dst->x + dst->w) > (src->x + src->w) ? (dst->x + dst->w) : (src->x + src->w);
+    y2 = (dst->y + dst->h) > (src->y + src->h) ? (dst->y + dst->h) : (src->y + src->h);
+    dst->x = x1;
+    dst->y = y1;
+    dst->w = x2 - x1;
+    dst->h = y2 - y1;
 }
 
 static uint32_t gfx_blend_color(uint32_t dst, uint32_t src, uint8_t alpha) {
@@ -118,6 +159,11 @@ static int gfx_commit_mode(uint32_t *lfb, uint16_t w, uint16_t h, uint16_t pitch
     g_profile.density = gfx_pick_density(w, h);
 
     mem_set(g_backbuffer, 0, (uint32_t)g_width * g_height * 4);
+    mem_set(&g_stats, 0, sizeof(g_stats));
+    g_dirty_count = 0;
+    g_fps_window_tick = timer_get_ticks();
+    g_fps_window_frames = 0;
+    g_frame_start_tick = timer_get_ticks();
     gfx_swap();
     return 1;
 }
@@ -307,6 +353,9 @@ void gfx_swap(void) {
         uint32_t *src = &g_backbuffer[y * g_width];
         mem_copy(dst, src, (uint32_t)g_width * 4);
     }
+    g_stats.full_swaps++;
+    g_stats.frames_presented++;
+    g_stats.present_pixels += (uint32_t)g_width * (uint32_t)g_height;
 }
 
 void gfx_present_rect(int x, int y, int w, int h) {
@@ -324,6 +373,104 @@ void gfx_present_rect(int x, int y, int w, int h) {
         uint32_t *src = &g_backbuffer[row * g_width + x0];
         mem_copy(dst, src, (uint32_t)(x1 - x0) * 4);
     }
+    g_stats.rect_presents++;
+    g_stats.present_pixels += (uint32_t)(x1 - x0) * (uint32_t)(y1 - y0);
+}
+
+void gfx_set_partial_present(int enabled) {
+    g_partial_present = enabled ? 1 : 0;
+}
+
+int gfx_partial_present_enabled(void) {
+    return g_partial_present;
+}
+
+void gfx_invalidate_rect(int x, int y, int w, int h) {
+    gfx_rect_t r;
+
+    if (w <= 0 || h <= 0 || g_width <= 0 || g_height <= 0) return;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x >= g_width || y >= g_height) return;
+    if (x + w > g_width) w = g_width - x;
+    if (y + h > g_height) h = g_height - y;
+    if (w <= 0 || h <= 0) return;
+
+    r.x = x;
+    r.y = y;
+    r.w = w;
+    r.h = h;
+
+    for (int i = 0; i < g_dirty_count; i++) {
+        if (gfx_rects_overlap_or_touch(&g_dirty_rects[i], &r)) {
+            gfx_rect_union(&g_dirty_rects[i], &r);
+            g_stats.rects_merged++;
+            return;
+        }
+    }
+
+    if (g_dirty_count >= GFX_MAX_DIRTY_RECTS) {
+        g_dirty_rects[0].x = 0;
+        g_dirty_rects[0].y = 0;
+        g_dirty_rects[0].w = g_width;
+        g_dirty_rects[0].h = g_height;
+        g_dirty_count = 1;
+        g_stats.rects_merged++;
+        return;
+    }
+
+    g_dirty_rects[g_dirty_count++] = r;
+}
+
+void gfx_invalidate_full(void) {
+    gfx_invalidate_rect(0, 0, g_width, g_height);
+}
+
+void gfx_present_dirty(void) {
+    if (!g_lfb) return;
+    if (!g_partial_present) {
+        gfx_swap();
+        g_dirty_count = 0;
+        return;
+    }
+    if (g_dirty_count <= 0) return;
+    for (int i = 0; i < g_dirty_count; i++) {
+        gfx_present_rect(g_dirty_rects[i].x, g_dirty_rects[i].y,
+                         g_dirty_rects[i].w, g_dirty_rects[i].h);
+    }
+    g_stats.frames_presented++;
+    g_dirty_count = 0;
+}
+
+void gfx_begin_frame(void) {
+    uint32_t now = timer_get_ticks();
+
+    g_frame_start_tick = now;
+    g_stats.frames_total++;
+    g_fps_window_frames++;
+    if (g_fps_window_tick == 0) {
+        g_fps_window_tick = now;
+    } else if (now - g_fps_window_tick >= 100u) {
+        uint32_t elapsed = now - g_fps_window_tick;
+        if (elapsed == 0) elapsed = 1;
+        g_stats.fps = (g_fps_window_frames * 100u) / elapsed;
+        g_fps_window_frames = 0;
+        g_fps_window_tick = now;
+    }
+}
+
+void gfx_end_frame(void) {
+    uint32_t now = timer_get_ticks();
+    g_stats.last_frame_ticks = now - g_frame_start_tick;
+}
+
+void gfx_mark_frame_coalesced(void) {
+    g_stats.coalesced_frames++;
+}
+
+void gfx_get_frame_stats(gfx_frame_stats_t *out) {
+    if (!out) return;
+    *out = g_stats;
 }
 
 void gfx_draw_char(int x, int y, char c, uint32_t fg, uint32_t bg) {

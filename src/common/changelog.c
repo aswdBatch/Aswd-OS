@@ -3,6 +3,19 @@
 static const changelog_entry_t g_entries[] = {
     {
         "v0.8",
+        "2026-04-21",
+        "Desktop rendering now uses dirty presents with frame stats and safer repaint flow.",
+        {
+            "Added renderer-side dirty rectangle tracking, partial present controls, and frame telemetry (FPS, frame ticks, rect presents, merges, and coalesced frames) so GUI updates no longer require full framebuffer copies every time.",
+            "Updated the desktop loop to use a guarded repaint coordinator with partial-present enabled by default, plus cursor-frame coalescing to reduce tiny pointer-move bursts that used to spam presents.",
+            "Task Manager and Dev Tools now surface live render telemetry, making it easier to verify performance behavior while testing in QEMU.",
+            "Introduced shared wrapped text-box primitives in the theme system and moved core widgets (tabs, list rows, buttons, section headers) onto bounded text drawing so labels stay inside UI bounds more reliably.",
+            "Refined shared widget styling toward a flatter, higher-contrast look to support the ongoing shell-wide visual rewrite.",
+        },
+        5,
+    },
+    {
+        "v0.8",
         "2026-03-28",
         "Boot no longer probes Wi-Fi hardware before the desktop is reachable.",
         {

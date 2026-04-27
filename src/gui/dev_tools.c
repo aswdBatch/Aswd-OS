@@ -43,7 +43,23 @@ static void run_selected(void) {
 
 static void dev_tools_on_paint(int win_id) {
     gui_rect_t r = gui_window_content(win_id);
+    gfx_frame_stats_t fs;
+    char stats_line[96];
+    char num[16];
     int i;
+    int by;
+
+    gfx_get_frame_stats(&fs);
+    stats_line[0] = '\0';
+    str_copy(stats_line, "FPS ", sizeof(stats_line));
+    u32_to_dec(fs.fps, num, sizeof(num));
+    str_cat(stats_line, num, sizeof(stats_line));
+    str_cat(stats_line, "  frameTicks ", sizeof(stats_line));
+    u32_to_dec(fs.last_frame_ticks, num, sizeof(num));
+    str_cat(stats_line, num, sizeof(stats_line));
+    str_cat(stats_line, "  coalesced ", sizeof(stats_line));
+    u32_to_dec(fs.coalesced_frames, num, sizeof(num));
+    str_cat(stats_line, num, sizeof(stats_line));
 
     gfx_fill_rect(r.x, r.y, r.w, r.h, COL_BG);
     gfx_draw_string(r.x + 12, r.y + 10, "Diagnostics", COL_DIM, COL_BG);
@@ -57,10 +73,12 @@ static void dev_tools_on_paint(int win_id) {
         gfx_draw_string(r.x + 18, y + 2, g_items[i], fg, bg);
     }
 
-    gfx_draw_string(r.x + 12, r.y + 40 + 3 * 28 + 8, "[Enter] Run selected test", COL_DIM, COL_BG);
+    by = r.y + 40 + 3 * 28 + 8;
+    gfx_draw_string(r.x + 12, by, "[Enter] Run selected test", COL_DIM, COL_BG);
+    gfx_draw_string(r.x + 12, by + 14, stats_line, COL_DIM, COL_BG);
 
     {
-        int dy = r.y + 40 + 3 * 28 + 36;
+        int dy = r.y + 40 + 3 * 28 + 50;
         uint32_t fc_bg;
         th_draw_section_header(r.x + 8, dy, r.w - 16, "Danger Zone", TH_DANGER_BG);
         dy += 24;

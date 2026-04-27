@@ -218,6 +218,8 @@ static int g_cursor_drawn = 0;
 static int g_cursor_x = 0;
 static int g_cursor_y = 0;
 static int g_logout_requested = 0;
+static int g_repaint_active = 0;
+static uint32_t g_last_cursor_present_tick = 0;
 
 /* App search overlay */
 static int  g_search_active = 0;
@@ -1824,6 +1826,12 @@ static int run_idle_ticks(uint32_t now) {
 }
 
 void gui_repaint(void) {
+    if (g_repaint_active) {
+        return;
+    }
+    g_repaint_active = 1;
+    gfx_begin_frame();
+
     int sw = gfx_width();
     int sh = gfx_height();
     uint8_t search_alpha = shell_anim_alpha(&g_search_anim);
@@ -1919,9 +1927,15 @@ void gui_repaint(void) {
         (void)row;
     }
 
-    gfx_swap();
+    if (!gfx_partial_present_enabled()) {
+        gfx_swap();
+    } else {
+        gfx_present_dirty();
+    }
     g_cursor_drawn = 0;
     present_cursor_overlay(mouse_x(), mouse_y());
+    gfx_end_frame();
+    g_repaint_active = 0;
 }
 
 static void clear_focus(void) {
@@ -2149,6 +2163,9 @@ void gui_init(void) {
     g_start_popup.visible = 0;
     g_start_popup.kind = START_POPUP_NONE;
     g_start_popup.items = 0;
+    g_repaint_active = 0;
+    g_last_cursor_present_tick = 0;
+    gfx_set_partial_present(1);
 }
 
 int gui_window_create(const char *title, int x, int y, int w, int h) {
@@ -2942,6 +2959,7 @@ static void handle_pointer_event(const input_event_t *evt, int *dirty, int *curs
 void gui_run(void) {
     input_event_t evt;
     gui_init();
+    gfx_invalidate_full();
     gui_repaint();
 
     for (;;) {
@@ -2950,6 +2968,7 @@ void gui_run(void) {
 
         if (!input_try_get_event(&evt)) {
             if (run_idle_ticks(timer_get_ticks())) {
+                gfx_invalidate_full();
                 gui_repaint();
                 continue;
             }
@@ -2980,9 +2999,18 @@ void gui_run(void) {
         }
 
         if (dirty) {
+            gfx_invalidate_full();
             gui_repaint();
         } else if (cursor_only) {
-            present_cursor_overlay(evt.pointer.x, evt.pointer.y);
+            uint32_t now = timer_get_ticks();
+            if (now != g_last_cursor_present_tick) {
+                gfx_begin_frame();
+                present_cursor_overlay(evt.pointer.x, evt.pointer.y);
+                gfx_end_frame();
+                g_last_cursor_present_tick = now;
+            } else {
+                gfx_mark_frame_coalesced();
+            }
         }
     }
 }

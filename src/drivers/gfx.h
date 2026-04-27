@@ -25,6 +25,18 @@ typedef struct {
     gfx_density_t density;
 } gfx_display_profile_t;
 
+typedef struct {
+    uint32_t frames_total;
+    uint32_t frames_presented;
+    uint32_t full_swaps;
+    uint32_t rect_presents;
+    uint32_t rects_merged;
+    uint32_t present_pixels;
+    uint32_t coalesced_frames;
+    uint32_t fps;
+    uint32_t last_frame_ticks;
+} gfx_frame_stats_t;
+
 int         gfx_init(void);
 gfx_mode_t  gfx_get_mode(void);
 uint16_t    gfx_width(void);
@@ -40,6 +52,15 @@ void     gfx_fill_rect_gradient_h(int x, int y, int w, int h, uint32_t left, uin
 void     gfx_blit(int dx, int dy, int w, int h, const uint32_t *src, int src_pitch);
 void     gfx_swap(void);
 void     gfx_present_rect(int x, int y, int w, int h);
+void     gfx_begin_frame(void);
+void     gfx_end_frame(void);
+void     gfx_set_partial_present(int enabled);
+int      gfx_partial_present_enabled(void);
+void     gfx_invalidate_rect(int x, int y, int w, int h);
+void     gfx_invalidate_full(void);
+void     gfx_present_dirty(void);
+void     gfx_mark_frame_coalesced(void);
+void     gfx_get_frame_stats(gfx_frame_stats_t *out);
 uint32_t *gfx_backbuffer(void);
 
 void gfx_draw_char_role(int x, int y, char c, font_role_t role, int font_px,

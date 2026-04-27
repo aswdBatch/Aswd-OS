@@ -75,6 +75,9 @@ uint32_t th_lerp_color(uint32_t from, uint32_t to, uint8_t progress);
 int  th_text_width(const char *text, int font_px);
 void th_draw_text(int x, int y, const char *text, uint32_t fg, uint32_t bg, int font_px);
 void th_draw_text_center(int x, int y, int w, const char *text, uint32_t fg, uint32_t bg, int font_px);
+int  th_measure_wrapped_height(const char *text, int width, int font_px, int max_lines);
+int  th_draw_text_box(int x, int y, int w, int h, const char *text,
+                      uint32_t fg, uint32_t bg, int font_px, int max_lines, int center);
 int  th_fit_aspect_rect(int outer_x, int outer_y, int outer_w, int outer_h,
                         int design_w, int design_h, int allow_stretch_pct,
                         int *out_x, int *out_y, int *out_w, int *out_h);
