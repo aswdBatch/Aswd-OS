@@ -3,6 +3,7 @@
 #include "auth/auth_gui.h"
 #include "boot/bootui.h"
 #include "boot/multiboot.h"
+#include "common/boot_log.h"
 #include "common/colors.h"
 #include "common/config.h"
 #include "console/console.h"
@@ -69,6 +70,7 @@ static void kernel_boot_fs_lab(const boot_selection_t *selection) {
 
 static void kernel_boot_normal(const boot_selection_t *selection) {
   boot_loading_begin();
+  boot_log_line("boot: storage");
   kernel_init_storage(1);
   boot_loading_step("Starting timer");
   timer_init(100);
@@ -78,10 +80,17 @@ static void kernel_boot_normal(const boot_selection_t *selection) {
 
   boot_loading_step("Scanning PCI");
   pci_init();
+  boot_log_line("boot: pci scan done");
   boot_loading_step("Initializing USB");
-  usb_init();
+  if (pci_has_usb_controller()) {
+    usb_init();
+    boot_log_line("boot: usb init");
+  } else {
+    boot_log_line("boot: usb skipped (no PCI USB)");
+  }
   boot_loading_step("Initializing network");
   net_init();
+  boot_log_line("boot: net init");
 
   boot_loading_step("Ready");
   boot_loading_finish();
@@ -118,6 +127,9 @@ void kernel_main(uint32_t multiboot_magic, uint32_t multiboot_addr) {
   idt_init();
   serial_init();
   multiboot_init(multiboot_magic, multiboot_addr);
+  if (!multiboot_boot_quiet()) {
+    serial_write("[kernel] serial ready\n");
+  }
   gfx_init();
   vga_init();
   vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);

@@ -3,9 +3,12 @@
 #include <stdint.h>
 
 #include "boot/bootui.h"
+#include "common/config.h"
 #include "cpu/bugcheck.h"
 #include "console/console.h"
+#include "cpu/ports.h"
 #include "drivers/disk.h"
+#include "drivers/serial.h"
 #include "lib/string.h"
 
 /* ── State ──────────────────────────────────────────────────────────── */
@@ -50,6 +53,66 @@ static uint32_t cluster_to_lba(uint32_t c) {
     return g_data_start + (c - 2) * (uint32_t)g_sec_per_clus;
 }
 
+/* CMOS → FAT DOS date/time (last write fields and creation mirror). */
+static void fat32_now_dos(uint16_t *out_time, uint16_t *out_date) {
+    uint8_t hv, mv, sv, dv, mthv, yrv;
+    int hour, min, sec, day, mon, yr;
+    uint16_t t;
+    uint16_t d;
+
+    outb(0x70, 0x04); hv   = inb(0x71);
+    outb(0x70, 0x02); mv   = inb(0x71);
+    outb(0x70, 0x00); sv   = inb(0x71);
+    outb(0x70, 0x07); dv   = inb(0x71);
+    outb(0x70, 0x08); mthv = inb(0x71);
+    outb(0x70, 0x09); yrv  = inb(0x71);
+
+    hour = (hv & 0xF) + ((hv >> 4) & 0xF) * 10;
+    min  = (mv & 0xF) + ((mv >> 4) & 0xF) * 10;
+    sec  = (sv & 0xF) + ((sv >> 4) & 0xF) * 10;
+    day  = (dv & 0xF) + ((dv >> 4) & 0xF) * 10;
+    mon  = (mthv & 0xF) + ((mthv >> 4) & 0xF) * 10;
+    yr   = 2000 + (yrv & 0xF) + ((yrv >> 4) & 0xF) * 10;
+
+    if (yr < 1980) yr = 1980;
+    if (mon < 1) mon = 1;
+    if (mon > 12) mon = 12;
+    if (day < 1) day = 1;
+    if (day > 31) day = 31;
+    if (hour > 23) hour = 23;
+    if (min > 59) min = 59;
+    if (sec > 59) sec = 59;
+
+    t = (uint16_t)(((uint16_t)(hour & 0x1F) << 11) |
+                   ((uint16_t)(min & 0x3F) << 5) |
+                   (uint16_t)((sec / 2) & 0x1F));
+    d = (uint16_t)((((uint16_t)(yr - 1980) & 0x7F) << 9) |
+                   ((uint16_t)(mon & 0xF) << 5) |
+                   (uint16_t)(day & 0x1F));
+
+    *out_time = t;
+    *out_date = d;
+}
+
+static void fat32_stamp_ent_times(uint8_t ent[32]) {
+    uint16_t t, da;
+    fat32_now_dos(&t, &da);
+    ent[13] = 0;
+    w16le(ent + 14, t);
+    w16le(ent + 16, da);
+    w16le(ent + 18, da);
+    w16le(ent + 22, t);
+    w16le(ent + 24, da);
+}
+
+static void fat32_stamp_write_only(uint8_t ent[32]) {
+    uint16_t t, da;
+    fat32_now_dos(&t, &da);
+    w16le(ent + 22, t);
+    w16le(ent + 24, da);
+    w16le(ent + 18, da);
+}
+
 static uint32_t fat_read_entry(uint32_t cluster);
 static int fat_write_entry(uint32_t cluster, uint32_t value);
 static int write_dir_entry(uint32_t dir_cluster, const uint8_t entry[32]);
@@ -89,6 +152,9 @@ static int fat_chain_next(uint32_t cluster, uint32_t *next_out) {
 /* ── FAT cache ──────────────────────────────────────────────────────── */
 static int fat_flush(void) {
     if (!g_fat_dirty) return 0;
+#if FAT_DEBUG_SERIAL
+    serial_write("[fat32] fat_flush\n");
+#endif
     if (disk_write_sectors(g_fat_cache_lba, 1, g_fat_cache) != 0) return -1;
     /* write FAT2 as well */
     if (disk_write_sectors(g_fat_cache_lba + g_fat_size, 1, g_fat_cache) != 0) return -1;
@@ -320,6 +386,8 @@ static int list_cb(uint8_t *ent, void *ctx) {
     fe->size    = u32le(ent + 28);
     fe->attr    = attr;
     fe->is_dir  = (attr & 0x10) ? 1 : 0;
+    fe->mod_time = u16le(ent + 22);
+    fe->mod_date = u16le(ent + 24);
     /* skip . and .. */
     if (fe->name[0] == '.') return 0;
     lc->count++;
@@ -346,6 +414,8 @@ static int find_cb(uint8_t *ent, void *ctx) {
     fc->out->size    = u32le(ent + 28);
     fc->out->attr    = attr;
     fc->out->is_dir  = (attr & 0x10) ? 1 : 0;
+    fc->out->mod_time = u16le(ent + 22);
+    fc->out->mod_date = u16le(ent + 24);
     fc->found = 1;
     return 1; /* stop walking */
 }
@@ -412,6 +482,7 @@ static int update_or_create_dir_entry(uint32_t dir_cluster, const char *name,
                 w16le(ent + 20, (uint16_t)(first_clus >> 16));
                 w16le(ent + 26, (uint16_t)(first_clus & 0xFFFF));
                 w32le(ent + 28, size);
+                fat32_stamp_write_only(ent);
                 return disk_write_sectors(lba + s, 1, g_sec_buf);
             }
         }
@@ -432,6 +503,7 @@ not_found:
         w16le(entry + 20, (uint16_t)(first_clus >> 16));
         w16le(entry + 26, (uint16_t)(first_clus & 0xFFFF));
         w32le(entry + 28, size);
+        fat32_stamp_ent_times(entry);
         return write_dir_entry(dir_cluster, entry);
     }
 }
@@ -590,6 +662,239 @@ int fat32_delete_entry(uint32_t dir_cluster, const char *name) {
     return -1;
 }
 
+int fat32_move_entry(uint32_t src_parent, const char *src_name,
+                     uint32_t dst_parent, const char *dst_name) {
+    uint32_t clus = src_parent;
+    uint32_t hops = 0;
+    fat32_entry_t conflict;
+
+    if (!validate_83_name(src_name) || !validate_83_name(dst_name)) {
+        return -1;
+    }
+    if (fat32_find_entry(dst_parent, dst_name, &conflict) > 0) {
+        return -1;
+    }
+
+    while (cluster_valid(clus)) {
+        if (hops++ > g_cluster_limit) {
+            return -1;
+        }
+        uint32_t lba = cluster_to_lba(clus);
+        for (uint8_t s = 0; s < g_sec_per_clus; s++) {
+            if (disk_read_sectors(lba + s, 1, g_sec_buf) != 0) {
+                return -1;
+            }
+            for (int e = 0; e < 16; e++) {
+                uint8_t *ent = g_sec_buf + e * 32;
+                uint8_t attr;
+
+                if (ent[0] == 0x00) {
+                    return 0;
+                }
+                if (ent[0] == 0xE5) {
+                    continue;
+                }
+                attr = ent[11];
+                if (attr == 0x0F || attr == 0x08) {
+                    continue;
+                }
+                if (!match_83(ent, src_name)) {
+                    continue;
+                }
+                if (attr & 0x10) {
+                    return -1;
+                }
+
+                {
+                    uint8_t saved[32];
+                    mem_copy(saved, ent, 32);
+                    to_83(dst_name, saved);
+                    fat32_stamp_ent_times(saved);
+
+                    ent[0] = 0xE5;
+                    if (disk_write_sectors(lba + s, 1, g_sec_buf) != 0) {
+                        return -1;
+                    }
+                    if (write_dir_entry(dst_parent, saved) != 0) {
+                        return -1;
+                    }
+                    return fat_flush() == 0 ? 1 : -1;
+                }
+            }
+        }
+        {
+            uint32_t next = 0;
+            int next_r = fat_chain_next(clus, &next);
+            if (next_r < 0) {
+                return -1;
+            }
+            if (next_r == 0) {
+                return 0;
+            }
+            clus = next;
+        }
+    }
+    return -1;
+}
+
+int fat32_copy_file(uint32_t src_dir_clus, const char *src_name,
+                    uint32_t dst_dir_clus, const char *dst_name) {
+    fat32_entry_t src;
+    uint32_t old_dst_clus = 0;
+    uint32_t first_clus = 0;
+    uint32_t prev_clus = 0;
+    uint32_t written = 0;
+    uint32_t srcc;
+    uint32_t file_sz;
+    uint32_t hop_r = 0;
+
+    if (!validate_83_name(src_name) || !validate_83_name(dst_name)) {
+        return -1;
+    }
+    if (fat32_find_entry(src_dir_clus, src_name, &src) <= 0 || src.is_dir) {
+        return -1;
+    }
+    {
+        fat32_entry_t existing;
+        int df = fat32_find_entry(dst_dir_clus, dst_name, &existing);
+        if (df < 0) {
+            return -1;
+        }
+        if (df > 0) {
+            if (existing.is_dir) {
+                return -1;
+            }
+            old_dst_clus = existing.cluster;
+        }
+    }
+
+    srcc = src.cluster;
+    file_sz = src.size;
+
+    while (written < file_sz) {
+        uint32_t nc = fat_alloc_cluster();
+        uint32_t dlba;
+        uint32_t slba;
+        uint8_t si;
+
+        if (!nc) {
+            if (first_clus) {
+                free_cluster_chain(first_clus);
+            }
+            return -1;
+        }
+        if (first_clus == 0) {
+            first_clus = nc;
+        }
+        if (prev_clus && fat_write_entry(prev_clus, nc) != 0) {
+            free_cluster_chain(first_clus);
+            return -1;
+        }
+
+        dlba = cluster_to_lba(nc);
+        slba = cluster_to_lba(srcc);
+
+        for (si = 0; si < g_sec_per_clus && written < file_sz; si++) {
+            uint32_t chunk = file_sz - written;
+            if (chunk > 512u) {
+                chunk = 512u;
+            }
+            if (disk_read_sectors(slba + si, 1, g_sec_buf) != 0) {
+                free_cluster_chain(first_clus);
+                return -1;
+            }
+            if (chunk < 512u) {
+                mem_set(g_sec_buf + chunk, 0, (size_t)(512u - chunk));
+            }
+            if (disk_write_sectors(dlba + si, 1, g_sec_buf) != 0) {
+                free_cluster_chain(first_clus);
+                return -1;
+            }
+            written += chunk;
+        }
+
+        prev_clus = nc;
+
+        if (written >= file_sz) {
+            break;
+        }
+
+        {
+            uint32_t next_s = 0;
+            int nr = fat_chain_next(srcc, &next_s);
+            if (nr < 0 || nr == 0) {
+                free_cluster_chain(first_clus);
+                return -1;
+            }
+            srcc = next_s;
+        }
+        if (hop_r++ > g_cluster_limit) {
+            free_cluster_chain(first_clus);
+            return -1;
+        }
+    }
+
+    if (fat_flush() != 0) {
+        free_cluster_chain(first_clus);
+        return -1;
+    }
+
+    if (update_or_create_dir_entry(dst_dir_clus, dst_name, first_clus, file_sz) != 0) {
+        free_cluster_chain(first_clus);
+        return -1;
+    }
+
+    if (old_dst_clus && cluster_valid(old_dst_clus)) {
+        free_cluster_chain(old_dst_clus);
+    }
+    return 1;
+}
+
+int fat32_copy_dir_recursive(uint32_t src_dir_clus, uint32_t dst_parent_clus,
+                             const char *dst_dir_name) {
+    fat32_entry_t dst_ent;
+    fat32_entry_t list[48];
+    int n;
+    int i;
+
+    if (!validate_83_name(dst_dir_name)) {
+        return -1;
+    }
+    if (fat32_find_entry(dst_parent_clus, dst_dir_name, &dst_ent) > 0) {
+        return -1;
+    }
+    if (fat32_mkdir(dst_parent_clus, dst_dir_name) <= 0) {
+        return -1;
+    }
+    if (fat32_find_entry(dst_parent_clus, dst_dir_name, &dst_ent) <= 0 ||
+        !dst_ent.is_dir) {
+        return -1;
+    }
+
+    n = fat32_list_dir(src_dir_clus, list, (int)(sizeof(list) / sizeof(list[0])));
+    if (n < 0) {
+        return -1;
+    }
+
+    for (i = 0; i < n; i++) {
+        if (list[i].name[0] == '.') {
+            continue;
+        }
+        if (!list[i].is_dir) {
+            if (fat32_copy_file(src_dir_clus, list[i].name, dst_ent.cluster,
+                                list[i].name) != 1) {
+                return -1;
+            }
+        } else {
+            if (fat32_copy_dir_recursive(list[i].cluster, dst_ent.cluster,
+                                         list[i].name) != 1) {
+                return -1;
+            }
+        }
+    }
+    return 1;
+}
+
 static int dir_is_effectively_empty(uint32_t dir_cluster) {
     uint32_t clus = dir_cluster;
     uint32_t hops = 0;
@@ -679,6 +984,7 @@ int fat32_mkdir(uint32_t dir_cluster, const char *name) {
     entry[11] = 0x10; /* directory */
     w16le(entry + 20, (uint16_t)(nc >> 16));
     w16le(entry + 26, (uint16_t)(nc & 0xFFFF));
+    fat32_stamp_ent_times(entry);
     if (write_dir_entry(dir_cluster, entry) != 0) return -1;
     return 1;
 }
@@ -752,6 +1058,39 @@ int fat32_get_info(fat32_info_t *out) {
     out->partition_start_lba = g_part_start;
     out->fat_start_lba = g_fat_start;
     out->data_start_lba = g_data_start;
+    return 1;
+}
+
+int fat32_get_usage(fat32_usage_t *out) {
+    uint32_t total_clusters;
+    uint32_t free_clusters = 0;
+    uint32_t bytes_per_cluster;
+
+    if (!out || g_root_cluster_user == 0 || g_data_start == 0 ||
+        g_cluster_limit <= 2u || g_sec_per_clus == 0) {
+        return 0;
+    }
+
+    total_clusters = g_cluster_limit - 2u;
+    bytes_per_cluster = (uint32_t)g_bytes_per_sec * (uint32_t)g_sec_per_clus;
+
+    for (uint32_t c = 2; c < g_cluster_limit; c++) {
+        uint32_t fat_entry = fat_read_entry(c);
+        if (fat_entry == 0xFFFFFFFFu) {
+            return 0;
+        }
+        if (fat_entry == 0) {
+            free_clusters++;
+        }
+    }
+
+    out->total_clusters = total_clusters;
+    out->free_clusters = free_clusters;
+    out->used_clusters = total_clusters - free_clusters;
+    out->bytes_per_cluster = bytes_per_cluster;
+    out->total_bytes = (uint64_t)total_clusters * (uint64_t)bytes_per_cluster;
+    out->free_bytes = (uint64_t)free_clusters * (uint64_t)bytes_per_cluster;
+    out->used_bytes = (uint64_t)out->used_clusters * (uint64_t)bytes_per_cluster;
     return 1;
 }
 

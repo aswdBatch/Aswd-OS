@@ -3,10 +3,10 @@
 #include <stdint.h>
 
 #include "cpu/ports.h"
-#include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "drivers/serial.h"
 #include "lib/string.h"
+#include "usb/hid.h"
 
 /* ---- UHCI I/O register offsets ---- */
 #define USBCMD    0x00u
@@ -114,6 +114,18 @@ static inline void      reg_w32(uint16_t base, uint16_t off, uint32_t v) { outl(
 /* ---- TD/QH address helpers ---- */
 static uint32_t td_phys(unsigned ci, unsigned ti) { return (uint32_t)(uintptr_t)&g_td[ci][ti]; }
 static uint32_t qh_phys(unsigned ci, unsigned qi) { return (uint32_t)(uintptr_t)&g_qh[ci][qi]; }
+
+/* TD status bits 0-10: actual length; 0 = full maxlen packet for successful IN. */
+static unsigned uhci_td_in_length(uint32_t ctrl_sts, unsigned maxlen) {
+    if (ctrl_sts & TD_STS_ERR) {
+        return 0;
+    }
+    unsigned act = (unsigned)(ctrl_sts & 0x7FFu);
+    if (act == 0) {
+        return maxlen > 8u ? 8u : maxlen;
+    }
+    return act > 8u ? 8u : act;
+}
 
 /* Build TD token word */
 static uint32_t make_token(uint8_t pid, uint8_t addr, uint8_t ep,
@@ -475,89 +487,8 @@ static void setup_kb_interrupt_td(unsigned ci) {
     }
 }
 
-/* ---- HID boot-protocol keyboard report → keyboard_push_char ---- *
- * Report layout: [modifier, reserved, key0, key1, key2, key3, key4, key5] */
-static const char hid_usage_normal[128] = {
-    0,    0,    0,    0,    'a',  'b',  'c',  'd',  /* 0x00-0x07 */
-    'e',  'f',  'g',  'h',  'i',  'j',  'k',  'l',  /* 0x08-0x0F */
-    'm',  'n',  'o',  'p',  'q',  'r',  's',  't',  /* 0x10-0x17 */
-    'u',  'v',  'w',  'x',  'y',  'z',  '1',  '2',  /* 0x18-0x1F */
-    '3',  '4',  '5',  '6',  '7',  '8',  '9',  '0',  /* 0x20-0x27 */
-    '\r', 0x1B, '\b', '\t', ' ',  '-',  '=',  '[',  /* 0x28-0x2F */
-    ']', '\\',  0,    ';', '\'',  '`',  ',',  '.',  /* 0x30-0x37 */
-    '/',  0,    0,    0,    0,    0,    0,    0,     /* 0x38-0x3F */
-    0,    0,    0,    0,    0,    0,    0,    0,     /* 0x40-0x47 */
-    0,    0,    0,    0,    0,    0,    0,    0,     /* 0x48-0x4F */
-    0,    0,    0,    0,    '/',  '*',  '-',  '+',  /* 0x50-0x57 */
-    '\r', '1',  '2',  '3',  '4',  '5',  '6',  '7', /* 0x58-0x5F */
-    '8',  '9',  '0',  '.',  0,    0,    0,    0,    /* 0x60-0x67 */
-    0,    0,    0,    0,    0,    0,    0,    0,     /* 0x68-0x6F */
-    0,    0,    0,    0,    0,    0,    0,    0,     /* 0x70-0x77 */
-    0,    0,    0,    0,    0,    0,    0,    0,     /* 0x78-0x7F */
-};
-
-static const char hid_usage_shift[128] = {
-    0,    0,    0,    0,    'A',  'B',  'C',  'D',
-    'E',  'F',  'G',  'H',  'I',  'J',  'K',  'L',
-    'M',  'N',  'O',  'P',  'Q',  'R',  'S',  'T',
-    'U',  'V',  'W',  'X',  'Y',  'Z',  '!',  '@',
-    '#',  '$',  '%',  '^',  '&',  '*',  '(',  ')',
-    '\r', 0x1B, '\b', '\t', ' ',  '_',  '+',  '{',
-    '}',  '|',  0,    ':',  '"',  '~',  '<',  '>',
-    '?',  0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    '/',  '*',  '-',  '+',
-    '\r', '1',  '2',  '3',  '4',  '5',  '6',  '7',
-    '8',  '9',  '0',  '.',  0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0,
-};
-
 static void process_kb_report(unsigned ci) {
-    uint8_t *rpt  = g_kb_rpt[ci];
-    uint8_t  mod  = rpt[0];
-    int      shift = (mod & 0x22u) != 0;   /* LShift or RShift */
-    int      ctrl  = (mod & 0x11u) != 0;   /* LCtrl  or RCtrl  */
-    unsigned k;
-
-    for (k = 2; k < 8; k++) {
-        uint8_t code = rpt[k];
-        if (code == 0 || code == 0x01) continue;  /* 0 = no key, 1 = phantom */
-
-        /* Check if this key was already pressed last report */
-        int already = 0;
-        unsigned j;
-        for (j = 0; j < 6; j++) {
-            if (g_kb_prev[ci][j] == code) { already = 1; break; }
-        }
-        if (already) continue;
-
-        /* Translate to special keys first */
-        if (code == 0x4F) { keyboard_push_char(KEY_RIGHT);    continue; }
-        if (code == 0x50) { keyboard_push_char(KEY_LEFT);     continue; }
-        if (code == 0x51) { keyboard_push_char(KEY_DOWN);     continue; }
-        if (code == 0x52) { keyboard_push_char(KEY_UP);       continue; }
-        if (code == 0x4A) { keyboard_push_char(KEY_HOME);     continue; }
-        if (code == 0x4D) { keyboard_push_char(KEY_END);      continue; }
-        if (code == 0x4B) { keyboard_push_char(KEY_PAGEUP);   continue; }
-        if (code == 0x4E) { keyboard_push_char(KEY_PAGEDOWN); continue; }
-        if (code == 0x4C) { keyboard_push_char(KEY_DELETE);   continue; }
-        if (code == 0x49) { keyboard_push_char(KEY_INSERT);   continue; }
-
-        if (code >= 128) continue;
-        char c = shift ? hid_usage_shift[code] : hid_usage_normal[code];
-        if (!c) continue;
-
-        if (ctrl && c >= 'a' && c <= 'z') c = (char)(c - 'a' + 1);
-        else if (ctrl && c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 1);
-
-        keyboard_push_char(c);
-    }
-
-    /* Save current keys */
-    for (k = 0; k < 6; k++) g_kb_prev[ci][k] = rpt[k + 2];
+    usb_hid_boot_keyboard_process(g_kb_rpt[ci], g_kb_prev[ci]);
 }
 
 /* ---- Enumerate one port ---- *
@@ -716,11 +647,18 @@ void uhci_poll(usb_controller_t *ctrl) {
             if (td->ctrl_sts & TD_STS_ERR) {
                 g_toggle[ci] = 0;
             } else {
-                uint8_t btns = g_rpt[ci][0] & 0x07u;
-                int8_t  dx   = (int8_t)g_rpt[ci][1];
-                int8_t  dy   = (int8_t)g_rpt[ci][2];
-                if (dx != 0 || dy != 0 || btns != g_prev_btns[ci]) {
-                    mouse_push_usb_event((int)dx, -(int)dy, btns);
+                unsigned rlen = uhci_td_in_length(td->ctrl_sts, (unsigned)g_maxpkt[ci]);
+                int dx = 0, dy = 0;
+                uint8_t btns = 0;
+                int8_t wheel = 0;
+                if (rlen < 8u) {
+                    mem_set(g_rpt[ci] + rlen, 0, (size_t)(8u - rlen));
+                }
+                if (rlen >= 3u) {
+                    usb_hid_parse_boot_mouse(g_rpt[ci], rlen, &dx, &dy, &btns, &wheel);
+                }
+                if (dx != 0 || dy != 0 || wheel != 0 || btns != g_prev_btns[ci]) {
+                    mouse_push_usb_event(dx, -(int)dy, btns, wheel);
                     g_prev_btns[ci] = btns;
                 }
                 g_toggle[ci] ^= 1;

@@ -32,7 +32,7 @@ static int is_ident_start(char c) {
 }
 
 static int is_ident_char(char c) {
-    return is_ident_start(c) || (c >= '0' && c <= '9');
+    return is_ident_start(c) || (c >= '0' && c <= '9') || c == '.';
 }
 
 static void add_tok(tok_t type, int32_t ival, uint16_t sval, uint16_t line) {

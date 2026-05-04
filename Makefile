@@ -39,6 +39,7 @@ C_SOURCES := \
 	src/drivers/mouse.c \
 	src/drivers/pci.c \
 	src/common/changelog.c \
+	src/common/boot_log.c \
 	src/common/palette.c \
 	src/common/power.c \
 	src/assets/font_assets.c \
@@ -79,6 +80,7 @@ C_SOURCES := \
 	src/usb/ehci.c \
 	src/usb/xhci.c \
 	src/usb/hid.c \
+	src/usb/hid_kbd.c \
 	src/drivers/speaker.c \
 	src/gui/calc_gui.c \
 	src/gui/browser_gui.c \
@@ -125,15 +127,15 @@ OBJ_TRAMPOLINE := $(OBJDIR)/usbboot/trampoline.o
 all: iso
 
 $(OBJDIR)/%.o: src/%.c
-	@cmd /c "if not exist $(subst /,\,$(@D)) mkdir $(subst /,\,$(@D))"
+	@$(POWERSHELL) -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(subst /,\,$(@D))' | Out-Null"
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR)/%.o: src/%.asm
-	@cmd /c "if not exist $(subst /,\,$(@D)) mkdir $(subst /,\,$(@D))"
+	@$(POWERSHELL) -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(subst /,\,$(@D))' | Out-Null"
 	$(AS) -f elf32 $< -o $@
 
 $(OBJDIR)/usbboot/trampoline.bin: src/usbboot/trampoline.asm
-	@cmd /c "if not exist $(subst /,\,$(@D)) mkdir $(subst /,\,$(@D))"
+	@$(POWERSHELL) -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(subst /,\,$(@D))' | Out-Null"
 	$(AS) -f bin $< -o $@
 
 $(OBJDIR)/usbboot/trampoline.o: $(OBJDIR)/usbboot/trampoline.bin

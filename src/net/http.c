@@ -311,6 +311,270 @@ static int http_get_once(const char *url,
 
 /* ── Public http_get (with redirect following) ───────────────────── */
 
+static int http_post_once(const char *url,
+                          const char *post_body, uint16_t post_len,
+                          char *body_buf, uint16_t body_max,
+                          int *status_out,
+                          char *location_out, uint16_t loc_max) {
+    char host[128];
+    char path[256];
+    uint16_t port;
+    uint8_t  ip[4];
+    char req[384];
+    char lenhdr[8];
+    uint8_t  recv_buf[1024];
+    int  in_body   = 0;
+    int  chunked   = 0;
+    uint16_t body_len = 0;
+    uint32_t deadline;
+    int status = 0;
+
+    if (status_out)   *status_out   = 0;
+    if (location_out) location_out[0] = '\0';
+
+    if (!parse_url(url, host, sizeof(host), &port, path, sizeof(path))) {
+        http_set_error(HTTP_ERR_URL);
+        return -1;
+    }
+    if (!site_allow_matches(host)) {
+        http_set_error(HTTP_ERR_NOT_ALLOWED);
+        return -1;
+    }
+    if (!dns_resolve(host, ip)) {
+        http_set_error(HTTP_ERR_DNS);
+        return -1;
+    }
+    if (tcp_connect(ip, port) != 0) {
+        http_set_error(HTTP_ERR_CONNECT);
+        return -1;
+    }
+
+    u32_to_dec((uint32_t)post_len, lenhdr, sizeof(lenhdr));
+
+    {
+        uint16_t pos = 0;
+        const char *mth = "POST ";
+        const char *http11 = " HTTP/1.1\r\nHost: ";
+        const char *cl = "\r\nContent-Type: application/octet-stream\r\nContent-Length: ";
+        const char *end = "\r\nConnection: close\r\n\r\n";
+        uint16_t mlen = (uint16_t)str_len(mth);
+        uint16_t plen = (uint16_t)str_len(path);
+        uint16_t hlen = (uint16_t)str_len(http11);
+        uint16_t nh   = (uint16_t)str_len(host);
+        uint16_t clen = (uint16_t)str_len(cl);
+        uint16_t llen = (uint16_t)str_len(lenhdr);
+        uint16_t elen = (uint16_t)str_len(end);
+        uint32_t total = (uint32_t)mlen + plen + hlen + nh + clen + llen + elen + post_len;
+        if (total >= sizeof(req)) {
+            tcp_close();
+            http_set_error(HTTP_ERR_SEND);
+            return -1;
+        }
+        mem_copy(req + pos, mth, mlen); pos += mlen;
+        mem_copy(req + pos, path, plen); pos += plen;
+        mem_copy(req + pos, http11, hlen); pos += hlen;
+        mem_copy(req + pos, host, nh); pos += nh;
+        mem_copy(req + pos, cl, clen); pos += clen;
+        mem_copy(req + pos, lenhdr, llen); pos += llen;
+        mem_copy(req + pos, end, elen); pos += elen;
+        req[pos] = '\0';
+    }
+
+    if (tcp_send_data((const uint8_t *)req,
+                      (uint16_t)str_len(req)) < 0 ||
+        (post_len > 0 &&
+         tcp_send_data((const uint8_t *)post_body, post_len) < 0)) {
+        http_set_error(HTTP_ERR_SEND);
+        tcp_close();
+        return -1;
+    }
+
+    hdr_reset();
+
+    deadline = timer_get_ticks() + 500u;
+    while (timer_get_ticks() < deadline) {
+        net_poll();
+        tcp_check_retransmit();
+        int n = tcp_recv_data(recv_buf, (uint16_t)sizeof(recv_buf) - 1);
+        if (n < 0) break;
+        if (n == 0) {
+            if (!tcp_connected()) break;
+            __asm__ volatile("sti; hlt");
+            continue;
+        }
+        recv_buf[n] = '\0';
+        deadline = timer_get_ticks() + 300u;
+
+        uint8_t *p         = recv_buf;
+        int      remaining = n;
+
+        if (!in_body) {
+            int body_start_len = 0;
+            const uint8_t *body_start = hdr_feed(p, remaining, &body_start_len);
+            if (!body_start) continue;
+
+            status  = hdr_parse_status();
+
+            if (location_out && loc_max > 0) {
+                const char *loc = hdr_find("Location");
+                if (loc) {
+                    int llen = 0;
+                    while (loc[llen] && loc[llen] != '\r' && loc[llen] != '\n') llen++;
+                    if (llen >= (int)loc_max) llen = (int)loc_max - 1;
+                    mem_copy(location_out, loc, (uint32_t)llen);
+                    location_out[llen] = '\0';
+                }
+            }
+
+            const char *te = hdr_find("Transfer-Encoding");
+            if (te && str_ncmp(te, "chunked", 7) == 0) {
+                chunked = 1;
+                chunked_reset();
+            }
+
+            in_body   = 1;
+            p         = (uint8_t *)body_start;
+            remaining = body_start_len;
+            if (remaining <= 0) continue;
+        }
+
+        if (chunked) {
+            if (chunked_feed(p, remaining, body_buf, body_max, &body_len))
+                break;
+        } else {
+            uint16_t copy = (uint16_t)remaining;
+            if (body_len + copy >= body_max) copy = (uint16_t)(body_max - body_len - 1);
+            if (copy > 0) {
+                mem_copy(body_buf + body_len, p, copy);
+                body_len += copy;
+                body_buf[body_len] = '\0';
+            }
+        }
+    }
+
+    tcp_close();
+    if (status_out) *status_out = status;
+    return (int)body_len;
+}
+
+int http_post(const char *url, const char *post_body, uint16_t post_len,
+              char *resp_buf, uint16_t resp_max, int *status_out) {
+    static char current_url[512];
+    static char location[512];
+    int redirects = 0;
+    int status;
+
+    g_last_error = HTTP_ERR_NONE;
+    str_copy(current_url, url, sizeof(current_url));
+    if (resp_max > 0) resp_buf[0] = '\0';
+
+    while (redirects <= 5) {
+        status = 0;
+        location[0] = '\0';
+        int rc = http_post_once(current_url, post_body, post_len, resp_buf, resp_max,
+                                &status, location, sizeof(location));
+        if (rc < 0) {
+            if (status_out) *status_out = 0;
+            return -1;
+        }
+        if ((status == 301 || status == 302 || status == 303 ||
+              status == 307 || status == 308) &&
+            location[0] &&
+            str_ncmp(location, "http://", 7) == 0) {
+            str_copy(current_url, location, sizeof(current_url));
+            if (resp_max > 0) resp_buf[0] = '\0';
+            redirects++;
+            continue;
+        }
+        if (status_out) *status_out = status;
+        return rc;
+    }
+    http_set_error(HTTP_ERR_REDIRECT);
+    if (status_out) *status_out = 0;
+    return -1;
+}
+
+int http_proxy_connect_open(const char *proxy_url,
+                            const char *target_host, uint16_t target_port) {
+    char host[128];
+    char path[256];
+    uint16_t port;
+    uint8_t ip[4];
+    char req[320];
+    char portbuf[8];
+    uint8_t recv_buf[512];
+    uint32_t deadline;
+
+    if (!parse_url(proxy_url, host, sizeof(host), &port, path, sizeof(path))) {
+        http_set_error(HTTP_ERR_URL);
+        return 0;
+    }
+    if (!site_allow_matches(host)) {
+        http_set_error(HTTP_ERR_NOT_ALLOWED);
+        return 0;
+    }
+    if (!dns_resolve(host, ip)) {
+        http_set_error(HTTP_ERR_DNS);
+        return 0;
+    }
+    if (tcp_connect(ip, port) != 0) {
+        http_set_error(HTTP_ERR_CONNECT);
+        return 0;
+    }
+
+    u32_to_dec((uint32_t)target_port, portbuf, sizeof(portbuf));
+    req[0] = '\0';
+    str_cat(req, "CONNECT ", sizeof(req));
+    str_cat(req, target_host, sizeof(req));
+    str_cat(req, ":", sizeof(req));
+    str_cat(req, portbuf, sizeof(req));
+    str_cat(req, " HTTP/1.1\r\nHost: ", sizeof(req));
+    str_cat(req, target_host, sizeof(req));
+    str_cat(req, ":", sizeof(req));
+    str_cat(req, portbuf, sizeof(req));
+    str_cat(req, "\r\nProxy-Connection: keep-alive\r\n\r\n", sizeof(req));
+
+    if (tcp_send_data((const uint8_t *)req, (uint16_t)str_len(req)) < 0) {
+        tcp_close();
+        http_set_error(HTTP_ERR_SEND);
+        return 0;
+    }
+
+    hdr_reset();
+    deadline = timer_get_ticks() + 400u;
+    while (timer_get_ticks() < deadline) {
+        net_poll();
+        tcp_check_retransmit();
+        int n = tcp_recv_data(recv_buf, (uint16_t)sizeof(recv_buf) - 1);
+        if (n < 0) break;
+        if (n == 0) {
+            if (!tcp_connected()) break;
+            __asm__ volatile("sti; hlt");
+            continue;
+        }
+        recv_buf[n] = '\0';
+        {
+            int body_start_len = 0;
+            const uint8_t *bs = hdr_feed(recv_buf, n, &body_start_len);
+            if (!bs) {
+                continue;
+            }
+            {
+                int st = hdr_parse_status();
+                if (st == 200) {
+                    return 1;
+                }
+            }
+            tcp_close();
+            http_set_error(HTTP_ERR_CONNECT);
+            return 0;
+        }
+    }
+    tcp_close();
+    http_set_error(HTTP_ERR_CONNECT);
+    return 0;
+}
+
 int http_get(const char *url, char *body_buf, uint16_t body_max, int *status_out) {
     static char current_url[512];
     static char location[512];
@@ -330,7 +594,9 @@ int http_get(const char *url, char *body_buf, uint16_t body_max, int *status_out
             if (status_out) *status_out = 0;
             return -1;
         }
-        if ((status == 301 || status == 302) && location[0] &&
+        if ((status == 301 || status == 302 || status == 303 ||
+              status == 307 || status == 308) &&
+            location[0] &&
             str_ncmp(location, "http://", 7) == 0) {
             str_copy(current_url, location, sizeof(current_url));
             if (body_max > 0) body_buf[0] = '\0';

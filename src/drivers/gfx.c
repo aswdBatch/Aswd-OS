@@ -164,6 +164,9 @@ static int gfx_commit_mode(uint32_t *lfb, uint16_t w, uint16_t h, uint16_t pitch
     g_fps_window_tick = timer_get_ticks();
     g_fps_window_frames = 0;
     g_frame_start_tick = timer_get_ticks();
+    if (pitch != (uint16_t)(w * 4u)) {
+        serial_write("GFX: note stride pitch != width*4 (scanline padding)\n");
+    }
     gfx_swap();
     return 1;
 }
@@ -206,11 +209,11 @@ int gfx_init(void) {
 
     /* Tier 3: BIOS stage2 VBE mode chosen in real mode. */
     if (bootvid_available() &&
-        gfx_commit_mode((uint32_t *)BOOTVID_FB_ADDR,
-                        BOOTVID_WIDTH,
-                        BOOTVID_HEIGHT,
-                        (uint16_t)BOOTVID_PITCH,
-                        BOOTVID_BPP)) {
+        gfx_commit_mode((uint32_t *)(uintptr_t)bootvid_fb_addr(),
+                        bootvid_width(),
+                        bootvid_height(),
+                        (uint16_t)bootvid_pitch(),
+                        bootvid_bpp())) {
         serial_write("GFX: stage2 VBE\n");
         return 1;
     }
@@ -427,6 +430,10 @@ void gfx_invalidate_full(void) {
 }
 
 void gfx_present_dirty(void) {
+    uint32_t dirty_px = 0;
+    uint32_t fb_px;
+    int i;
+
     if (!g_lfb) return;
     if (!g_partial_present) {
         gfx_swap();
@@ -434,7 +441,20 @@ void gfx_present_dirty(void) {
         return;
     }
     if (g_dirty_count <= 0) return;
-    for (int i = 0; i < g_dirty_count; i++) {
+
+    fb_px = (uint32_t)g_width * (uint32_t)g_height;
+    for (i = 0; i < g_dirty_count; i++) {
+        dirty_px += (uint32_t)g_dirty_rects[i].w * (uint32_t)g_dirty_rects[i].h;
+    }
+    /* One full memcpy often beats many partial stripes once most of the frame changed */
+    if (fb_px > 0 && dirty_px * 2u >= fb_px) {
+        gfx_swap();
+        g_stats.frames_presented++;
+        g_dirty_count = 0;
+        return;
+    }
+
+    for (i = 0; i < g_dirty_count; i++) {
         gfx_present_rect(g_dirty_rects[i].x, g_dirty_rects[i].y,
                          g_dirty_rects[i].w, g_dirty_rects[i].h);
     }

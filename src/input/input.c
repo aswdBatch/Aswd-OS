@@ -56,6 +56,7 @@ int input_try_get_event(input_event_t *out) {
     out->pointer.pressed = mouse.pressed;
     out->pointer.released = mouse.released;
     out->pointer.source = mouse.source;
+    out->pointer.wheel = mouse.wheel;
     return 1;
   }
 
@@ -68,6 +69,15 @@ char input_getchar(void) {
     if (input_try_getchar(&c)) return c;
     __asm__ volatile("sti; hlt");
   }
+}
+
+void input_shell_history_print(void) {
+    int i;
+    for (i = g_hist_count - 1; i >= 0; i--) {
+        const char *e = history_get(i);
+        if (!e) continue;
+        console_writeln(e);
+    }
 }
 
 void input_readline(char *buf, size_t buf_size) {

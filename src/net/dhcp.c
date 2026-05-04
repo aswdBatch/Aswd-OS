@@ -19,9 +19,6 @@
 #define DHCP_REQUEST  3
 #define DHCP_ACK      5
 
-/* Fixed-layout DHCP packet (BOOTP + magic cookie + options) */
-#define DHCP_BUF_SIZE 548u
-
 typedef struct __attribute__((packed)) {
     uint8_t  op;        /* 1=BOOTREQUEST */
     uint8_t  htype;     /* 1=Ethernet */
@@ -40,6 +37,9 @@ typedef struct __attribute__((packed)) {
     uint32_t magic;     /* 0x63825363 */
     uint8_t  options[312];
 } dhcp_pkt_t;
+
+/* Fixed-layout DHCP packet (BOOTP + magic cookie + options) */
+#define DHCP_BUF_SIZE ((uint16_t)sizeof(dhcp_pkt_t))
 
 typedef enum {
     DHCP_STATE_IDLE = 0,
@@ -155,7 +155,6 @@ static void parse_offer(const dhcp_pkt_t *pkt, uint16_t opt_len) {
 static void dhcp_rx(const uint8_t *src_ip, uint16_t src_port,
                     const uint8_t *data, uint16_t len, void *ctx) {
     const dhcp_pkt_t *pkt;
-    net_info_t *ni;
     uint8_t msg_type = 0;
     const uint8_t *o;
     uint16_t i;
@@ -184,8 +183,6 @@ static void dhcp_rx(const uint8_t *src_ip, uint16_t src_port,
         g_state = DHCP_STATE_REQUEST;
     } else if (msg_type == DHCP_ACK && g_state == DHCP_STATE_REQUEST) {
         parse_offer(pkt, 312);
-        ni = (net_info_t *)(uintptr_t)net_get_info(); /* cast away const for update */
-        /* Note: net.c exposes net_apply_dhcp for this */
         net_apply_dhcp(g_offered_ip, g_subnet, g_gateway, g_dns);
         g_state  = DHCP_STATE_BOUND;
         g_bound  = 1;

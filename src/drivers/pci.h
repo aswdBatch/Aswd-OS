@@ -20,6 +20,7 @@ typedef struct {
 typedef int (*pci_visit_fn)(const pci_device_t *dev, void *ctx);
 
 void     pci_init(void);
+void     pci_rescan(void);
 uint32_t pci_read32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off);
 uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off);
 uint8_t  pci_read8(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off);
@@ -27,3 +28,6 @@ void     pci_write32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off, uint32
 void     pci_write16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t off, uint16_t val);
 void     pci_enable_busmaster(uint8_t bus, uint8_t dev, uint8_t func);
 int      pci_enumerate(pci_visit_fn fn, void *ctx);
+int      pci_device_count(void);
+const pci_device_t *pci_device_at(int index);
+int      pci_has_usb_controller(void);

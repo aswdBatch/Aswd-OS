@@ -11,6 +11,7 @@
 
 #define DNS_PORT     53u
 #define DNS_SRC_PORT 1053u
+#define DNS_CACHE_SZ 10
 
 /* DNS header */
 typedef struct __attribute__((packed)) {
@@ -45,6 +46,46 @@ static int      g_pending = 0;
 static uint16_t g_txid    = 0x4153u;
 static uint8_t  g_result[4];
 static int      g_got_reply = 0;
+
+typedef struct {
+    char     host[96];
+    uint8_t  ip[4];
+    uint8_t  valid;
+} dns_cache_entry_t;
+
+static dns_cache_entry_t g_dns_cache[DNS_CACHE_SZ];
+static int               g_dns_cache_next = 0;
+
+static void dns_cache_promote(int idx) {
+    if (idx <= 0 || idx >= DNS_CACHE_SZ) {
+        return;
+    }
+    {
+        dns_cache_entry_t tmp = g_dns_cache[0];
+        g_dns_cache[0]        = g_dns_cache[idx];
+        g_dns_cache[idx]      = tmp;
+    }
+}
+
+static int dns_cache_lookup(const char *hostname, uint8_t *ip_out) {
+    int i;
+    for (i = 0; i < DNS_CACHE_SZ; i++) {
+        if (g_dns_cache[i].valid && str_eq(g_dns_cache[i].host, hostname)) {
+            mem_copy(ip_out, g_dns_cache[i].ip, 4);
+            dns_cache_promote(i);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void dns_cache_store(const char *hostname, const uint8_t *ip) {
+    dns_cache_entry_t *slot = &g_dns_cache[g_dns_cache_next];
+    g_dns_cache_next = (g_dns_cache_next + 1) % DNS_CACHE_SZ;
+    str_copy(slot->host, hostname, sizeof(slot->host));
+    mem_copy(slot->ip, ip, 4);
+    slot->valid = 1;
+}
 
 static void dns_rx(const uint8_t *src_ip, uint16_t src_port,
                    const uint8_t *data, uint16_t len, void *ctx) {
@@ -135,6 +176,10 @@ int dns_resolve(const char *hostname, uint8_t *ip_out) {
         }
     }
 
+    if (dns_cache_lookup(hostname, ip_out)) {
+        return 1;
+    }
+
     g_got_reply = 0;
     g_pending   = 1;
     g_txid      = (uint16_t)(g_txid + 1);
@@ -172,6 +217,7 @@ int dns_resolve(const char *hostname, uint8_t *ip_out) {
 
     if (g_got_reply) {
         mem_copy(ip_out, g_result, 4);
+        dns_cache_store(hostname, ip_out);
         return 1;
     }
     return 0;

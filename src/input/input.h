@@ -26,6 +26,7 @@ typedef struct {
       uint8_t pressed;
       uint8_t released;
       uint8_t source;
+      int8_t wheel;
     } pointer;
   };
 } input_event_t;
@@ -34,3 +35,4 @@ char input_getchar(void);
 int  input_try_getchar(char *out);
 int  input_try_get_event(input_event_t *out);
 void input_readline(char *buf, size_t buf_size);
+void input_shell_history_print(void);

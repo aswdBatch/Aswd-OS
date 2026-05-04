@@ -121,7 +121,11 @@ static void draw_text(int x, int y, const char *text, uint32_t fg, uint32_t bg) 
 static void draw_text_small(int x, int y, const char *text, uint32_t fg, uint32_t bg) {
     th_draw_text(x, y, text, fg, bg, th_metrics()->font_small);
 }
-
+static void append_sep(char *out, size_t size, const char *text) {
+    if (!out || !text || !text[0]) return;
+    if (out[0]) str_cat(out, " - ", size);
+    str_cat(out, text, size);
+}
 static void fmt_uptime(char *out, size_t size) {
     char tmp[16];
     uint32_t secs = timer_uptime_secs();
@@ -269,78 +273,104 @@ static void draw_display_tab(const gui_rect_t *r) {
     const th_metrics_t *tm = th_metrics();
     const gfx_display_profile_t *dp = gfx_display_profile();
     gui_rect_t inner = settings_inner_rect(r);
-    int y = inner.y;
+    gui_rect_t meta_card;
     int x = inner.x;
-    int last_card_y = inner.y;
-
+    int y = inner.y;
+    int grid_bottom = inner.y;
+    int profile_label_y;
+    int meta_h = 92;
     draw_text_small(x, y, "Themes", TH_ACCENT, COL_BG);
-    y += tm->font_small + tm->gap_sm;
-
     for (int i = 0; i < gui_background_theme_count(); i++) {
         gui_rect_t card;
         int selected = (i == (int)gui_get_background_theme());
-
         if (!display_theme_card_rect(r, i, &card)) continue;
-        if (card.y > last_card_y) last_card_y = card.y;
+        if (card.y + card.h > grid_bottom) grid_bottom = card.y + card.h;
         th_draw_card(card.x, card.y, card.w, card.h, 0,
                      selected ? gfx_rgb(240, 246, 255) : gfx_rgb(251, 252, 255), selected);
-        gfx_fill_rect_gradient_h(card.x + 1, card.y + 1, card.w - 2, 10,
+        gfx_fill_rect_gradient_h(card.x + 1, card.y + 1, card.w - 2, 8,
                                  gui_background_theme_preview_color(i),
                                  gfx_rgb(24, 35, 50));
-        draw_text(card.x + 10, card.y + 18, gui_background_theme_name(i), COL_TEXT, TH_BG_CARD);
-        draw_text_small(card.x + 10, card.y + 42,
-                  selected ? "Active desktop theme" : "Click to apply",
-                  selected ? TH_ACCENT : COL_DIM, TH_BG_CARD);
+        draw_text(card.x + 10, card.y + 14, gui_background_theme_name(i), COL_TEXT, TH_BG_CARD);
+        draw_text_small(card.x + 10, card.y + 36,
+                        selected ? "Active desktop theme" : "Click to apply",
+                        selected ? TH_ACCENT : COL_DIM, TH_BG_CARD);
         if (selected) {
-            th_draw_badge(card.x + card.w - 58, card.y + 14, "Active", TH_ACCENT, TH_TEXT_INVERT);
+            th_draw_badge(card.x + card.w - 58, card.y + 12, "Active", TH_ACCENT, TH_TEXT_INVERT);
         }
     }
-
-    y = last_card_y + 88;
-    if (y + 120 > inner.y + inner.h) {
-        y = inner.y + inner.h - 120;
+    profile_label_y = grid_bottom + tm->gap_md;
+    meta_card.x = x;
+    meta_card.y = profile_label_y + tm->font_small + tm->gap_sm;
+    meta_card.w = inner.w;
+    meta_card.h = meta_h;
+    if (meta_card.y + meta_card.h > inner.y + inner.h) {
+        meta_card.y = inner.y + inner.h - meta_card.h;
+        profile_label_y = meta_card.y - tm->font_small - tm->gap_sm;
     }
-    if (y < inner.y + 94) y = inner.y + 94;
-    th_draw_separator(x, y - tm->gap_sm, inner.w);
-    draw_text_small(x, y, "Display profile", TH_ACCENT, COL_BG);
-    y += tm->font_small + tm->gap_sm;
+    draw_text_small(x, profile_label_y, "Display profile", TH_ACCENT, COL_BG);
+    th_draw_card(meta_card.x, meta_card.y, meta_card.w, meta_card.h, 0, gfx_rgb(251, 252, 255), 0);
     {
         char line[48];
         char num[16];
+        int col_w = (meta_card.w - 36) / 2;
+        int left_x = meta_card.x + 12;
+        int right_x = left_x + col_w + 12;
+        int label_y = meta_card.y + 12;
+        int value_y = label_y + tm->font_small + 4;
+        int second_label_y = value_y + tm->font_body + tm->gap_md;
+        int second_value_y = second_label_y + tm->font_small + 4;
         line[0] = '\0';
         u32_to_dec(dp->framebuffer_w, num, sizeof(num));
         str_copy(line, num, sizeof(line));
         str_cat(line, " x ", sizeof(line));
         u32_to_dec(dp->framebuffer_h, num, sizeof(num));
         str_cat(line, num, sizeof(line));
-        draw_kv(x, &y, "Framebuffer", line);
+        draw_text_small(left_x, label_y, "Framebuffer", COL_DIM, COL_BG);
+        draw_text(left_x, value_y, line, COL_TEXT, COL_BG);
+        draw_text_small(right_x, label_y, "Aspect", COL_DIM, COL_BG);
+        draw_text(right_x, value_y,
+                  dp->aspect == GFX_ASPECT_4_3 ? "4:3"
+                  : (dp->aspect == GFX_ASPECT_16_10 ? "16:10" : "16:9"),
+                  COL_TEXT, COL_BG);
+        draw_text_small(left_x, second_label_y, "Density", COL_DIM, COL_BG);
+        draw_text(left_x, second_value_y,
+                  dp->density == GFX_DENSITY_COMPACT ? "Compact"
+                  : (dp->density == GFX_DENSITY_NORMAL ? "Normal" : "Comfortable"),
+                  COL_TEXT, COL_BG);
     }
-    draw_kv(x, &y, "Aspect",
-            dp->aspect == GFX_ASPECT_4_3 ? "4:3"
-            : (dp->aspect == GFX_ASPECT_16_10 ? "16:10" : "16:9"));
-    draw_kv(x, &y, "Density",
-            dp->density == GFX_DENSITY_COMPACT ? "Compact"
-            : (dp->density == GFX_DENSITY_NORMAL ? "Normal" : "Comfortable"));
 }
 
 static int display_theme_card_rect(const gui_rect_t *r, int index, gui_rect_t *out) {
     const th_metrics_t *tm = th_metrics();
     gui_rect_t inner = settings_inner_rect(r);
-    int cols = 1;
+    int gap = tm->gap_sm;
+    int count = gui_background_theme_count();
+    int cols = inner.w >= 620 ? 3 : (inner.w >= 360 ? 2 : 1);
+    int rows;
     int card_w;
-    int col = index % cols;
-    int row = index / cols;
-    int gap = tm->gap_md;
+    int card_h = 52;
+    int top_y = inner.y + tm->font_small + tm->gap_sm + 6;
+    int avail_h = inner.h - (tm->font_small * 2) - tm->gap_md - 86;
+    int col;
+    int row;
 
-    th_measure_grid(inner.w, 180, gap, 3, &cols, &card_w);
+    if (cols > count) cols = count;
+    if (cols < 1) cols = 1;
+    rows = (count + cols - 1) / cols;
+    card_w = (inner.w - gap * (cols - 1)) / cols;
+    if (rows > 0 && avail_h > 0) {
+        int max_card_h = (avail_h - gap * (rows - 1)) / rows;
+        if (max_card_h < card_h) card_h = max_card_h;
+        if (card_h < 44) card_h = 44;
+    }
     col = index % cols;
     row = index / cols;
 
     if (!out) return 0;
     out->x = inner.x + col * (card_w + gap);
-    out->y = inner.y + 18 + row * 88;
+    out->y = top_y + row * (card_h + gap);
     out->w = card_w;
-    out->h = 74;
+    out->h = card_h;
     return 1;
 }
 
@@ -487,29 +517,24 @@ static void draw_network_tab(const gui_rect_t *r) {
     char right[64];
     char line[96];
     char state_badge[32];
-
     ensure_network_wifi_ready();
     scan_count = wifi_scan_count();
     saved_count = wifi_saved_count();
-
     draw_text_small(x, y, "Network", TH_ACCENT, COL_BG);
     y += tm->font_small + tm->gap_sm;
-
     str_copy(left, ni->nic_name[0] ? ni->nic_name : "No wired NIC", sizeof(left));
     if (ni->ip[0] || ni->ip[1] || ni->ip[2] || ni->ip[3]) {
         format_ipv4(line, sizeof(line), ni->ip);
-        str_cat(left, " • ", sizeof(left));
-        str_cat(left, line, sizeof(left));
+        append_sep(left, sizeof(left), line);
     }
     if (ni->link_up && !(ni->ip[0] || ni->ip[1] || ni->ip[2] || ni->ip[3])) {
-        str_cat(left, ni->dhcp_pending ? " • DHCP" : " • idle", sizeof(left));
+        append_sep(left, sizeof(left), ni->dhcp_pending ? "DHCP" : "idle");
     }
     str_copy(center, wa->present ? wa->name : "Wi-Fi not detected", sizeof(center));
     str_copy(right, net_transport_name(ni->active_transport), sizeof(right));
     str_cat(right, " ", sizeof(right));
     str_cat(right, net_connection_state_name(ni->connection_state), sizeof(right));
     th_draw_info_strip(x, y, fw, left, center, right);
-
     network_tab_compute_layout(r, count, &layout);
     th_draw_card(layout.wifi_card_rect.x, layout.wifi_card_rect.y,
                  layout.wifi_card_rect.w, layout.wifi_card_rect.h, 0, TH_BG_CARD, 0);
@@ -517,9 +542,8 @@ static void draw_network_tab(const gui_rect_t *r) {
         int pad = tm->card_pad;
         int card_x = layout.wifi_card_rect.x + pad;
         int card_y = layout.wifi_card_rect.y + pad;
-        int label_y = layout.wifi_scan_rect.y - tm->font_small - 2;
-        int note_y = card_y + tm->font_small + tm->gap_sm;
-
+        int label_y = layout.wifi_scan_rect.y - tm->font_small - 4;
+        int note_y = card_y + tm->font_small + tm->gap_sm + 2;
         str_copy(state_badge,
                  !wa->present ? "No adapter"
                  : (!wa->supported ? "Unsupported"
@@ -534,16 +558,15 @@ static void draw_network_tab(const gui_rect_t *r) {
         line[0] = '\0';
         if (wa->present) {
             str_copy(line, wifi_family_name(wa->family), sizeof(line));
-            str_cat(line, " • ", sizeof(line));
-            str_cat(line, wifi_connection_note(), sizeof(line));
+            append_sep(line, sizeof(line), wifi_connection_note());
         } else {
             str_copy(line, "Saved profiles can still be staged here for later hardware testing.", sizeof(line));
         }
-        th_draw_text(card_x, note_y + tm->font_body + 2, line, TH_TEXT_DIM, TH_BG_CARD, tm->font_small);
-
+        th_draw_text_box(card_x, note_y + tm->font_body + 2,
+                         layout.wifi_card_rect.w - pad * 2 - 120, tm->font_small * 2 + 4,
+                         line, TH_TEXT_DIM, TH_BG_CARD, tm->font_small, 2, 0);
         th_draw_text(layout.wifi_scan_rect.x, label_y, "Scanned networks", TH_TEXT_DIM, TH_BG_CARD, tm->font_small);
         th_draw_text(layout.wifi_saved_rect.x, label_y, "Saved profiles", TH_TEXT_DIM, TH_BG_CARD, tm->font_small);
-
         if (scan_count == 0) {
             const char *empty_scan = !wa->present ? "(no Wi-Fi adapter)"
                 : (!wa->backend_ready ? "(live scan backend unavailable)" : "(no networks found)");
@@ -560,13 +583,11 @@ static void draw_network_tab(const gui_rect_t *r) {
                 if (!scan) continue;
                 row[0] = '\0';
                 str_copy(row, scan->ssid, sizeof(row));
-                str_cat(row, " • ", sizeof(row));
-                str_cat(row, wifi_security_name(scan->security), sizeof(row));
+                append_sep(row, sizeof(row), wifi_security_name(scan->security));
                 th_draw_list_row(layout.wifi_scan_rect.x, row_y, layout.wifi_scan_rect.w,
                                  tm->list_row_h, row, idx == g_wifi_scan_sel);
             }
         }
-
         if (saved_count == 0) {
             th_draw_list_row(layout.wifi_saved_rect.x, layout.wifi_saved_rect.y, layout.wifi_saved_rect.w,
                              tm->list_row_h, "(no saved profiles)", 0);
@@ -581,13 +602,11 @@ static void draw_network_tab(const gui_rect_t *r) {
                 if (!saved) continue;
                 row[0] = '\0';
                 str_copy(row, saved->ssid, sizeof(row));
-                str_cat(row, " • ", sizeof(row));
-                str_cat(row, wifi_security_name(saved->security), sizeof(row));
+                append_sep(row, sizeof(row), wifi_security_name(saved->security));
                 th_draw_list_row(layout.wifi_saved_rect.x, row_y, layout.wifi_saved_rect.w,
                                  tm->list_row_h, row, idx == g_wifi_saved_sel);
             }
         }
-
         th_draw_field(layout.wifi_ssid_rect.x, layout.wifi_ssid_rect.y,
                       layout.wifi_ssid_rect.w, g_wifi_ssid_input,
                       g_network_focus == NETWORK_FOCUS_WIFI_SSID, 0);
@@ -613,7 +632,6 @@ static void draw_network_tab(const gui_rect_t *r) {
                      g_wifi_msg[0] ? (g_wifi_msg_err ? TH_STATUS_ERR : TH_TEXT_DIM) : TH_TEXT_DIM,
                      TH_BG_CARD, tm->font_small);
     }
-
     th_draw_card(layout.site_card_rect.x, layout.site_card_rect.y,
                  layout.site_card_rect.w, layout.site_card_rect.h, 0, TH_BG_CARD, 0);
     {
@@ -626,11 +644,11 @@ static void draw_network_tab(const gui_rect_t *r) {
             th_draw_badge(layout.site_card_rect.x + layout.site_card_rect.w - 40, header_y - 2,
                           badge, TH_ACCENT, TH_TEXT_INVERT);
         }
-        th_draw_text(layout.site_card_rect.x + tm->card_pad, header_y + tm->font_small + 2,
-                     "Empty list means Browser and fetch can reach any host this session.",
-                     TH_TEXT_DIM, TH_BG_CARD, tm->font_small);
+        th_draw_text_box(layout.site_card_rect.x + tm->card_pad, header_y + tm->font_small + 2,
+                         layout.site_card_rect.w - tm->card_pad * 2, tm->font_small * 2 + 4,
+                         "Empty list means Browser and fetch can reach any host this session.",
+                         TH_TEXT_DIM, TH_BG_CARD, tm->font_small, 2, 0);
     }
-
     if (count == 0) {
         th_draw_list_row(layout.site_list_rect.x, layout.site_list_rect.y, layout.site_list_rect.w,
                          tm->list_row_h, "(no allowed sites yet)", 0);
@@ -645,19 +663,16 @@ static void draw_network_tab(const gui_rect_t *r) {
                              tm->list_row_h, host ? host : "", idx == g_site_sel);
         }
     }
-
     th_draw_field(layout.site_input_rect.x, layout.site_input_rect.y, layout.site_input_rect.w,
                   g_site_input, g_network_focus == NETWORK_FOCUS_SITE, 0);
     th_draw_button(layout.add_btn.x, layout.add_btn.y, layout.add_btn.w, tm->button_h, "Add", 0);
     th_draw_button(layout.remove_btn.x, layout.remove_btn.y, layout.remove_btn.w, tm->button_h, "Remove", count > 0);
     y = layout.footer_rect.y;
-
     if (g_site_msg[0]) {
         uint32_t fg = g_site_msg_err ? TH_STATUS_ERR : TH_TEXT_DIM;
         draw_text_small(x, y, g_site_msg, fg, COL_BG);
         y += tm->font_small + 2;
     }
-
     if (site_allow_persistent_available()) {
         draw_text_small(x, y, "Saved in /TLSALLOW.CFG so the list survives reboots.", COL_DIM, COL_BG);
     } else {
@@ -672,6 +687,7 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     int top = inner.y + tm->font_small + tm->gap_sm + th_info_strip_height() + tm->gap_md;
     int row_gap = 4;
     int site_min_h = tm->list_row_h + tm->field_h + tm->button_h + tm->font_small * 2 + tm->gap_lg + 10;
+    int wifi_header_h = tm->font_small + tm->font_body + tm->font_small * 2 + tm->gap_md + 18;
     int wifi_h;
     int site_h;
     int list_rows;
@@ -683,20 +699,17 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     int site_inner_x;
     int site_inner_w;
     int site_available_rows_h;
-
     if (!layout) return;
     mem_set(layout, 0, sizeof(*layout));
-
     wifi_h = inner.h - (top - inner.y) - site_min_h - tm->gap_lg;
-    if (wifi_h < 132) wifi_h = 132;
-    if (wifi_h > 192) wifi_h = 192;
+    if (wifi_h < 156) wifi_h = 156;
+    if (wifi_h > 212) wifi_h = 212;
     if (top + wifi_h + tm->gap_lg + site_min_h > inner.y + inner.h) {
         wifi_h = inner.y + inner.h - top - tm->gap_lg - site_min_h;
     }
-    if (wifi_h < 120) wifi_h = 120;
+    if (wifi_h < 140) wifi_h = 140;
     site_h = inner.y + inner.h - (top + wifi_h + tm->gap_lg);
     if (site_h < site_min_h) site_h = site_min_h;
-
     layout->wifi_card_rect.x = inner.x;
     layout->wifi_card_rect.y = top;
     layout->wifi_card_rect.w = inner.w;
@@ -705,17 +718,15 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     layout->site_card_rect.y = top + wifi_h + tm->gap_lg;
     layout->site_card_rect.w = inner.w;
     layout->site_card_rect.h = site_h;
-
     pad = tm->card_pad;
     col_gap = tm->gap_md;
     col_w = (layout->wifi_card_rect.w - pad * 2 - col_gap) / 2;
     if (col_w < 120) col_w = 120;
-    list_rows = (wifi_h >= 172) ? 2 : 1;
+    list_rows = (wifi_h >= 188) ? 2 : 1;
     list_h = list_rows * (tm->list_row_h + row_gap) - row_gap;
-
     layout->wifi_rows_to_draw = list_rows;
     layout->wifi_scan_rect.x = layout->wifi_card_rect.x + pad;
-    layout->wifi_scan_rect.y = layout->wifi_card_rect.y + pad + tm->font_small + tm->font_body + tm->gap_sm + 10;
+    layout->wifi_scan_rect.y = layout->wifi_card_rect.y + pad + wifi_header_h;
     layout->wifi_scan_rect.w = col_w;
     layout->wifi_scan_rect.h = list_h;
     layout->wifi_saved_rect.x = layout->wifi_scan_rect.x + col_w + col_gap;
@@ -730,7 +741,6 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     layout->wifi_pass_rect.y = layout->wifi_ssid_rect.y;
     layout->wifi_pass_rect.w = col_w;
     layout->wifi_pass_rect.h = tm->field_h;
-
     left_btn_w = (col_w - tm->gap_sm * 2) / 3;
     if (left_btn_w < 48) left_btn_w = 48;
     layout->wifi_security_btn.x = layout->wifi_scan_rect.x;
@@ -753,7 +763,6 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     layout->wifi_msg_rect.y = layout->wifi_security_btn.y + tm->button_h + tm->gap_sm;
     layout->wifi_msg_rect.w = layout->wifi_card_rect.w - pad * 2;
     layout->wifi_msg_rect.h = tm->font_small;
-
     site_inner_x = layout->site_card_rect.x + pad;
     site_inner_w = layout->site_card_rect.w - pad * 2;
     layout->add_btn.w = 72;
@@ -761,7 +770,7 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     layout->remove_btn.w = 72;
     layout->remove_btn.h = tm->button_h;
     layout->site_list_rect.x = site_inner_x;
-    layout->site_list_rect.y = layout->site_card_rect.y + pad + tm->font_small + tm->font_small + tm->gap_md + 4;
+    layout->site_list_rect.y = layout->site_card_rect.y + pad + tm->font_small + tm->font_small + tm->gap_lg + 8;
     layout->site_list_rect.w = site_inner_w;
     site_available_rows_h = layout->site_card_rect.y + layout->site_card_rect.h - layout->site_list_rect.y
                           - tm->field_h - tm->button_h - tm->font_small - tm->gap_md * 2 - tm->gap_sm;
@@ -782,7 +791,6 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     layout->footer_rect.y = layout->site_input_rect.y + tm->button_h + tm->gap_sm;
     layout->footer_rect.w = site_inner_w;
     layout->footer_rect.h = tm->font_small * 2;
-
     if (wifi_scan_count() <= layout->wifi_rows_to_draw) {
         layout->wifi_scan_start = 0;
     } else if (g_wifi_scan_sel <= 0) {
@@ -792,7 +800,6 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     } else {
         layout->wifi_scan_start = g_wifi_scan_sel;
     }
-
     if (wifi_saved_count() <= layout->wifi_rows_to_draw) {
         layout->wifi_saved_start = 0;
     } else if (g_wifi_saved_sel <= 0) {
@@ -802,7 +809,6 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
     } else {
         layout->wifi_saved_start = g_wifi_saved_sel;
     }
-
     if (count <= layout->site_rows_to_draw) {
         layout->site_list_start = 0;
     } else {
@@ -817,13 +823,19 @@ static void network_tab_compute_layout(const gui_rect_t *body, int count,
 static int settings_tab_rect(int index, gui_rect_t *out) {
     const th_metrics_t *tm = th_metrics();
     gui_rect_t r = gui_window_content(g_win_id);
-    int gap = tm->gap_sm;
+    int gap = tm->gap_xs;
     int tab_w = (r.w - 24 - gap * (TAB_COUNT - 1)) / TAB_COUNT;
     int tab_y = r.y + 8 + th_page_header_height() + tm->gap_sm;
+    int row_w;
+    int start_x;
 
     if (!out || index < 0 || index >= TAB_COUNT) return 0;
-    if (tab_w < 72) tab_w = 72;
-    out->x = r.x + 12 + index * (tab_w + gap);
+    if (tab_w > 108) tab_w = 108;
+    if (tab_w < 60) tab_w = 60;
+    row_w = tab_w * TAB_COUNT + gap * (TAB_COUNT - 1);
+    start_x = r.x + (r.w - row_w) / 2;
+    if (start_x < r.x + 12) start_x = r.x + 12;
+    out->x = start_x + index * (tab_w + gap);
     out->y = tab_y;
     out->w = tab_w;
     out->h = tm->tab_h;
@@ -1279,10 +1291,10 @@ void settings_gui_launch(void) {
         gui_window_focus(g_win_id);
         return;
     }
-    gui_window_suggest_rect(580, 340, &rect);
+    gui_window_suggest_rect(760, 540, &rect);
     g_win_id = gui_window_create("Control Panel", rect.x, rect.y, rect.w, rect.h);
     if (g_win_id < 0) return;
-    gui_window_set_min_size(g_win_id, 560, 360);
+    gui_window_set_min_size(g_win_id, 700, 500);
     g_tab = 0;
     g_create_name[0] = '\0'; g_create_name_len = 0;
     g_create_msg[0] = '\0'; g_create_msg_err = 0;
@@ -1315,3 +1327,4 @@ void control_panel_open_users(void) {
     g_tab = TAB_USERS;
     g_pending_create = 1;
 }
+

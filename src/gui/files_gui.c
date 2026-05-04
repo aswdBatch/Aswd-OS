@@ -36,8 +36,8 @@
 #define COL_HEADER          gfx_rgb(232, 238, 247)
 #define COL_STATUS          gfx_rgb(236, 241, 247)
 #define COL_BORDER          gfx_rgb(188, 200, 218)
-#define COL_TEXT            gfx_rgb(32, 44, 63)
-#define COL_TEXT_DIM        gfx_rgb(99, 112, 132)
+#define COL_TEXT            TH_TEXT
+#define COL_TEXT_DIM        TH_TEXT_DIM
 #define COL_ACCENT          gfx_rgb(38, 99, 235)
 #define COL_ACCENT_SOFT     gfx_rgb(220, 232, 252)
 #define COL_ROW_HOVER       gfx_rgb(243, 247, 253)

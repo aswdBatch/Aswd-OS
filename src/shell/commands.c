@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "common/boot_log.h"
 #include "common/changelog.h"
 #include "common/colors.h"
 #include "common/config.h"
@@ -18,6 +19,7 @@
 #include "drivers/vga.h"
 #include "editor/editor.h"
 #include "fs/vfs.h"
+#include "input/input.h"
 #include "lib/string.h"
 #include "net/dns.h"
 #include "net/http.h"
@@ -45,10 +47,13 @@ static void cmd_run(int argc, char *argv[]);
 static void cmd_confirm(int argc, char *argv[]);
 static void cmd_pwd(int argc, char *argv[]);
 static void cmd_ls(int argc, char *argv[]);
+static void cmd_df(int argc, char *argv[]);
 static void cmd_cd(int argc, char *argv[]);
 static void cmd_cat(int argc, char *argv[]);
 static void cmd_write(int argc, char *argv[]);
 static void cmd_rm(int argc, char *argv[]);
+static void cmd_cp(int argc, char *argv[]);
+static void cmd_mv(int argc, char *argv[]);
 static void cmd_mkdir(int argc, char *argv[]);
 static void cmd_rmdir(int argc, char *argv[]);
 static void cmd_edit(int argc, char *argv[]);
@@ -67,6 +72,14 @@ static void cmd_nslookup(int argc, char *argv[]);
 static void cmd_ifconfig(int argc, char *argv[]);
 static void cmd_ax(int argc, char *argv[]);
 static void cmd_axapp(int argc, char *argv[]);
+static void cmd_find(int argc, char *argv[]);
+static void cmd_grep(int argc, char *argv[]);
+static void cmd_history(int argc, char *argv[]);
+static void cmd_ln(int argc, char *argv[]);
+static void cmd_inspect(int argc, char *argv[]);
+static void cmd_test(int argc, char *argv[]);
+static void cmd_compile(int argc, char *argv[]);
+static void cmd_logs(int argc, char *argv[]);
 
 static const command_t g_cmds[] = {
     {"help", "List commands", cmd_help},
@@ -77,11 +90,14 @@ static const command_t g_cmds[] = {
     {"run", "Run script (built-in)", cmd_run},
     {"confirm", "Ask for confirmation", cmd_confirm},
     {"pwd", "Print current directory", cmd_pwd},
-    {"ls", "List current directory", cmd_ls},
+    {"ls", "List directory (ls -l time/size, ls -s human sizes)", cmd_ls},
+    {"df", "Show disk usage", cmd_df},
     {"cd", "Change directory", cmd_cd},
     {"cat", "Print a file", cmd_cat},
     {"write", "Write text to a file", cmd_write},
-    {"rm", "Remove a file", cmd_rm},
+    {"rm", "Remove file (send to /ROOT/RECYCLE.BIN); rm -f deletes permanently", cmd_rm},
+    {"cp", "Copy file or cp -r directory", cmd_cp},
+    {"mv", "Move or rename a file", cmd_mv},
     {"mkdir", "Create a directory", cmd_mkdir},
     {"rmdir", "Remove an empty directory", cmd_rmdir},
     {"edit", "Open the text editor", cmd_edit},
@@ -100,6 +116,14 @@ static const command_t g_cmds[] = {
     {"ifconfig",  "Show network configuration", cmd_ifconfig},
     {"ax",        "Run an Ax (.ax) script",     cmd_ax},
     {"axapp",     "Open an AX app (.ax project)", cmd_axapp},
+    {"find",      "Find entries in cwd matching substring", cmd_find},
+    {"grep",      "Search lines in a file for substring", cmd_grep},
+    {"history",   "Show shell input history", cmd_history},
+    {"ln",        "Link files (not supported on FAT32)", cmd_ln},
+    {"inspect",   "Show FAT volume summary", cmd_inspect},
+    {"test",      "Run scripts under /ROOT/tests/", cmd_test},
+    {"compile",   "Remote compile (not configured)", cmd_compile},
+    {"logs",      "Show boot log lines", cmd_logs},
 };
 
 void commands_init(void) {}
@@ -117,6 +141,75 @@ static void print_uint32(uint32_t value) {
   char buf[16];
   u32_to_dec(value, buf, sizeof(buf));
   console_write(buf);
+}
+
+static void u64_to_dec_local(uint64_t value, char *out, size_t out_size) {
+  char tmp[32];
+  size_t idx = 0;
+  size_t o = 0;
+
+  if (out_size == 0) {
+    return;
+  }
+
+  if (value == 0) {
+    out[0] = '0';
+    if (out_size > 1) {
+      out[1] = '\0';
+    }
+    return;
+  }
+
+  while (value > 0 && idx < sizeof(tmp)) {
+    tmp[idx++] = (char)('0' + (value % 10u));
+    value /= 10u;
+  }
+
+  while (idx > 0 && o + 1 < out_size) {
+    out[o++] = tmp[--idx];
+  }
+  out[o] = '\0';
+}
+
+static void print_uint64(uint64_t value) {
+  char buf[32];
+  u64_to_dec_local(value, buf, sizeof(buf));
+  console_write(buf);
+}
+
+static void print_human_size(uint64_t bytes) {
+  uint64_t scale = 1;
+  const char *suffix = "B";
+
+  if (bytes >= 1073741824ull) {
+    scale = 1073741824ull;
+    suffix = "G";
+  } else if (bytes >= 1048576ull) {
+    scale = 1048576ull;
+    suffix = "M";
+  } else if (bytes >= 1024ull) {
+    scale = 1024ull;
+    suffix = "K";
+  }
+
+  if (scale == 1) {
+    print_uint64(bytes);
+    console_write(suffix);
+    return;
+  }
+
+  {
+    uint64_t tenths = (bytes * 10ull + (scale / 2ull)) / scale;
+    uint64_t whole = tenths / 10ull;
+    uint64_t frac = tenths % 10ull;
+
+    print_uint64(whole);
+    if (whole < 100ull && frac != 0) {
+      console_putc('.');
+      print_uint64(frac);
+    }
+    console_write(suffix);
+  }
 }
 
 static void print_hex8(uint8_t value) {
@@ -355,12 +448,68 @@ static void cmd_pwd(int argc, char *argv[]) {
   console_writeln(vfs_cwd_path());
 }
 
+static void format_dos_stamp(uint16_t d, uint16_t t, char *buf, size_t buf_sz) {
+  unsigned year = 1980u + (unsigned)((d >> 9) & 0x7Fu);
+  unsigned mon  = (unsigned)((d >> 5) & 0xFu);
+  unsigned day  = (unsigned)(d & 0x1Fu);
+  unsigned hour = (unsigned)((t >> 11) & 0x1Fu);
+  unsigned min  = (unsigned)((t >> 5) & 0x3Fu);
+  char yb[8];
+
+  if (buf_sz < 20) {
+    if (buf_sz) buf[0] = '\0';
+    return;
+  }
+  u32_to_dec(year, yb, sizeof(yb));
+  str_copy(buf, yb, buf_sz);
+  str_cat(buf, "-", buf_sz);
+  if (mon < 10) str_cat(buf, "0", buf_sz);
+  {
+    char tb[6];
+    u32_to_dec(mon, tb, sizeof(tb));
+    str_cat(buf, tb, buf_sz);
+  }
+  str_cat(buf, "-", buf_sz);
+  if (day < 10) str_cat(buf, "0", buf_sz);
+  {
+    char tb[6];
+    u32_to_dec(day, tb, sizeof(tb));
+    str_cat(buf, tb, buf_sz);
+  }
+  str_cat(buf, " ", buf_sz);
+  if (hour < 10) str_cat(buf, "0", buf_sz);
+  {
+    char tb[6];
+    u32_to_dec(hour, tb, sizeof(tb));
+    str_cat(buf, tb, buf_sz);
+  }
+  str_cat(buf, ":", buf_sz);
+  if (min < 10) str_cat(buf, "0", buf_sz);
+  {
+    char tb[6];
+    u32_to_dec(min, tb, sizeof(tb));
+    str_cat(buf, tb, buf_sz);
+  }
+}
+
 static void cmd_ls(int argc, char *argv[]) {
-  (void)argc;
-  (void)argv;
+  int show_sizes = 0;
+  int show_long = 0;
+
   if (!vfs_available()) {
     console_writeln_colored("Filesystem not ready.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
     return;
+  }
+
+  for (int i = 1; i < argc; i++) {
+    if (str_eq(argv[i], "-s")) {
+      show_sizes = 1;
+    } else if (str_eq(argv[i], "-l")) {
+      show_long = 1;
+    } else {
+      print_usage("ls", "[-l] [-s]");
+      return;
+    }
   }
 
   fat32_entry_t entries[64];
@@ -372,18 +521,69 @@ static void cmd_ls(int argc, char *argv[]) {
 
   console_writeln(vfs_cwd_path());
   for (int i = 0; i < count; i++) {
+    if (show_long) {
+      char ts[24];
+      format_dos_stamp(entries[i].mod_date, entries[i].mod_time, ts, sizeof(ts));
+      console_write(ts);
+      console_write("  ");
+    }
     if (entries[i].is_dir) {
       console_write_colored("<DIR> ", VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
       console_writeln_colored(entries[i].name, VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
     } else {
-      console_write("      ");
-      char sizebuf[16];
-      u32_to_dec(entries[i].size, sizebuf, sizeof(sizebuf));
-      console_write_colored(sizebuf, VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+      if (!show_long) {
+        console_write("      ");
+      }
+      if (show_sizes || show_long) {
+        print_human_size(entries[i].size);
+      } else {
+        char sizebuf[16];
+        u32_to_dec(entries[i].size, sizebuf, sizeof(sizebuf));
+        console_write(sizebuf);
+      }
       console_write(" ");
       console_writeln_colored(entries[i].name, VGA_COLOR_WHITE, VGA_COLOR_BLACK);
     }
   }
+}
+
+static void cmd_df(int argc, char *argv[]) {
+  (void)argc;
+  (void)argv;
+
+  fat32_usage_t usage;
+  if (!vfs_available() || !fat32_get_usage(&usage)) {
+    console_writeln_colored("Filesystem metadata unavailable.", VGA_COLOR_LIGHT_RED,
+                            VGA_COLOR_BLACK);
+    return;
+  }
+
+  console_writeln("Filesystem  Size    Used    Free");
+  console_write("FAT32       ");
+  print_human_size(usage.total_bytes);
+  console_write("  ");
+  print_human_size(usage.used_bytes);
+  console_write("  ");
+  print_human_size(usage.free_bytes);
+  console_putc('\n');
+
+  console_write("total bytes: ");
+  print_uint64(usage.total_bytes);
+  console_putc('\n');
+  console_write("used bytes:  ");
+  print_uint64(usage.used_bytes);
+  console_putc('\n');
+  console_write("free bytes:  ");
+  print_uint64(usage.free_bytes);
+  console_putc('\n');
+
+  console_write("clusters: ");
+  print_uint32(usage.used_clusters);
+  console_write(" used, ");
+  print_uint32(usage.free_clusters);
+  console_write(" free, ");
+  print_uint32(usage.bytes_per_cluster);
+  console_writeln(" bytes/cluster");
 }
 
 static void cmd_cd(int argc, char *argv[]) {
@@ -458,8 +658,15 @@ static void cmd_write(int argc, char *argv[]) {
 }
 
 static void cmd_rm(int argc, char *argv[]) {
-  if (argc < 2) {
-    print_usage("rm", "<file>");
+  int force = 0;
+  int fi = 1;
+
+  while (fi < argc && str_eq(argv[fi], "-f")) {
+    force = 1;
+    fi++;
+  }
+  if (fi >= argc) {
+    print_usage("rm", "[-f] <file>");
     return;
   }
   if (!vfs_available()) {
@@ -467,9 +674,9 @@ static void cmd_rm(int argc, char *argv[]) {
     return;
   }
 
-  int rc = vfs_rm(argv[1]);
+  int rc = force ? vfs_rm_force(argv[fi]) : vfs_rm(argv[fi]);
   if (rc < 0) {
-    if (!command_targets_writable_workspace(argv[1])) {
+    if (!command_targets_writable_workspace(argv[fi])) {
       print_protected_location();
     } else {
       console_writeln_colored("rm failed.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
@@ -480,7 +687,266 @@ static void cmd_rm(int argc, char *argv[]) {
     console_writeln_colored("file not found.", VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
     return;
   }
-  console_writeln_colored("removed", VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+  console_writeln_colored(force ? "deleted" : "moved to recycle bin",
+                         VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+}
+
+static void cmd_cp(int argc, char *argv[]) {
+  int recursive = 0;
+  int ai = 1;
+
+  while (ai < argc && str_eq(argv[ai], "-r")) {
+    recursive = 1;
+    ai++;
+  }
+  if (ai + 2 > argc) {
+    print_usage("cp", "[-r] <src> <dst>");
+    return;
+  }
+  if (!vfs_available()) {
+    console_writeln_colored("Filesystem not ready.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    return;
+  }
+
+  {
+    int rc = vfs_cp(argv[ai], argv[ai + 1], recursive);
+    if (rc != 1) {
+      if (!command_targets_writable_workspace(argv[ai + 1])) {
+        print_protected_location();
+      } else {
+        console_writeln_colored("cp failed.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+      }
+      return;
+    }
+  }
+  console_writeln_colored("copied", VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+}
+
+static void cmd_mv(int argc, char *argv[]) {
+  if (argc < 3) {
+    print_usage("mv", "<src> <dst>");
+    return;
+  }
+  if (!vfs_available()) {
+    console_writeln_colored("Filesystem not ready.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    return;
+  }
+
+  if (vfs_mv(argv[1], argv[2]) != 1) {
+    if (!command_targets_writable_workspace(argv[2])) {
+      print_protected_location();
+    } else {
+      console_writeln_colored("mv failed.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    }
+    return;
+  }
+  console_writeln_colored("moved", VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+}
+
+static int str_contains_sub(const char *hay, const char *needle) {
+  size_t i;
+  size_t j;
+  size_t nl;
+
+  if (!needle || !needle[0]) {
+    return 1;
+  }
+  nl = str_len(needle);
+  for (i = 0; hay[i]; i++) {
+    for (j = 0; j < nl && hay[i + j]; j++) {
+      if (hay[i + j] != needle[j]) {
+        break;
+      }
+    }
+    if (j == nl) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static void cmd_find(int argc, char *argv[]) {
+  fat32_entry_t entries[64];
+  int count;
+  int i;
+
+  if (argc < 2) {
+    print_usage("find", "<substring>");
+    return;
+  }
+  if (!vfs_available()) {
+    console_writeln_colored("Filesystem not ready.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    return;
+  }
+
+  count = vfs_ls(entries, (int)(sizeof(entries) / sizeof(entries[0])));
+  if (count < 0) {
+    console_writeln_colored("find failed.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    return;
+  }
+
+  for (i = 0; i < count; i++) {
+    if (str_contains_sub(entries[i].name, argv[1])) {
+      console_writeln(entries[i].name);
+    }
+  }
+}
+
+static void cmd_grep(int argc, char *argv[]) {
+  uint8_t buf[4096];
+  int n;
+  char line[256];
+  int li;
+  int i;
+
+  if (argc < 3) {
+    print_usage("grep", "<text> <file>");
+    return;
+  }
+  if (!vfs_available()) {
+    console_writeln_colored("Filesystem not ready.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    return;
+  }
+
+  n = vfs_cat(argv[2], buf, (int)sizeof(buf) - 1);
+  if (n < 0) {
+    console_writeln_colored("grep: cannot read file.", VGA_COLOR_LIGHT_RED,
+                            VGA_COLOR_BLACK);
+    return;
+  }
+  buf[n] = '\0';
+
+  li = 0;
+  for (i = 0; i <= n; i++) {
+    char c = (char)buf[i];
+    if (c != '\n' && c != '\0') {
+      if (li + 1 < (int)sizeof(line)) {
+        line[li++] = c;
+      }
+      continue;
+    }
+    line[li] = '\0';
+    li = 0;
+    if (line[0] && str_contains_sub(line, argv[1])) {
+      console_writeln(line);
+    }
+  }
+}
+
+static void cmd_history(int argc, char *argv[]) {
+  (void)argc;
+  (void)argv;
+  input_shell_history_print();
+}
+
+static void cmd_ln(int argc, char *argv[]) {
+  (void)argc;
+  (void)argv;
+  console_writeln_colored("ln is not supported on FAT32 volumes.",
+                        VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+}
+
+static void cmd_inspect(int argc, char *argv[]) {
+  fat32_info_t info;
+  fat32_usage_t usage;
+
+  (void)argc;
+  (void)argv;
+
+  if (!fat32_get_info(&info)) {
+    console_writeln_colored("inspect: FAT unavailable.", VGA_COLOR_LIGHT_RED,
+                            VGA_COLOR_BLACK);
+    return;
+  }
+
+  console_writeln("FAT32 volume");
+  console_write("partition LBA: ");
+  print_uint32(info.partition_start_lba);
+  console_putc('\n');
+  console_write("bytes/sector: ");
+  print_uint32(info.bytes_per_sector);
+  console_putc('\n');
+  console_write("sectors/cluster: ");
+  print_uint32(info.sectors_per_cluster);
+  console_putc('\n');
+
+  if (fat32_get_usage(&usage)) {
+    console_write("total bytes: ");
+    print_uint64(usage.total_bytes);
+    console_putc('\n');
+    console_write("free bytes:  ");
+    print_uint64(usage.free_bytes);
+    console_putc('\n');
+    console_write("used bytes:  ");
+    print_uint64(usage.used_bytes);
+    console_putc('\n');
+    console_write("clusters (free/used): ");
+    print_uint32(usage.free_clusters);
+    console_write(" / ");
+    print_uint32(usage.used_clusters);
+    console_putc('\n');
+  }
+}
+
+static void cmd_test(int argc, char *argv[]) {
+  fat32_entry_t entries[24];
+  int count;
+  int i;
+  char cwd_save[128];
+  char path[160];
+  char *run_argv[3];
+
+  (void)argc;
+  (void)argv;
+
+  if (!vfs_available()) {
+    console_writeln_colored("Filesystem not ready.", VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    return;
+  }
+
+  str_copy(cwd_save, vfs_cwd_path(), sizeof(cwd_save));
+  if (!vfs_cd("/ROOT/tests")) {
+    console_writeln_colored("No /ROOT/tests directory.", VGA_COLOR_YELLOW,
+                            VGA_COLOR_BLACK);
+    return;
+  }
+
+  count = vfs_ls(entries, (int)(sizeof(entries) / sizeof(entries[0])));
+  if (count <= 0) {
+    console_writeln_colored("No tests found.", VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+    (void)vfs_cd(cwd_save);
+    return;
+  }
+
+  run_argv[0] = "run";
+  for (i = 0; i < count; i++) {
+    if (entries[i].is_dir) {
+      continue;
+    }
+    path[0] = '\0';
+    str_copy(path, "/ROOT/tests/", sizeof(path));
+    str_cat(path, entries[i].name, sizeof(path));
+    run_argv[1] = path;
+    console_write("--- ");
+    console_writeln(path);
+    cmd_run(2, run_argv);
+  }
+
+  (void)vfs_cd(cwd_save);
+}
+
+static void cmd_compile(int argc, char *argv[]) {
+  (void)argc;
+  (void)argv;
+  console_writeln_colored(
+      "compile: configure a remote builder URL to enable this command.",
+      VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+}
+
+static void cmd_logs(int argc, char *argv[]) {
+  (void)argc;
+  (void)argv;
+  boot_log_dump();
 }
 
 static void cmd_mkdir(int argc, char *argv[]) {
@@ -695,13 +1161,13 @@ static void cmd_vfstest(int argc, char *argv[]) {
     return;
   }
 
-  if (vfs_rm(k_root_name) < 0) {
+  if (vfs_rm_force(k_root_name) < 0) {
     vfstest_fail("pre-clean rm RWTEST.TXT");
     return;
   }
 
   if (vfs_cd("/ROOT/RWLAB")) {
-    if (vfs_rm(k_inner_name) < 0) {
+    if (vfs_rm_force(k_inner_name) < 0) {
       vfstest_fail("pre-clean rm /ROOT/RWLAB/INNER.TXT");
       return;
     }
@@ -723,6 +1189,62 @@ static void cmd_vfstest(int argc, char *argv[]) {
   if (n < 0) {
     vfstest_fail("ls /");
     return;
+  }
+
+  {
+    static const char *k_mv_dir = "MVLAB";
+    static const char *k_mv_src = "SRC.TXT";
+    static const char *k_mv_dst = "DST.TXT";
+    static const char *k_mv_data = "mv blob";
+
+    if (vfs_cd(k_mv_dir)) {
+      (void)vfs_rm_force(k_mv_dst);
+      (void)vfs_rm_force(k_mv_src);
+      if (!vfs_cd("/ROOT")) {
+        vfstest_fail("mv prep cd /ROOT");
+        return;
+      }
+      (void)vfs_rmdir(k_mv_dir);
+    }
+    if (!vfs_cd("/ROOT")) {
+      vfstest_fail("mv prep ensure /ROOT");
+      return;
+    }
+    if (vfs_mkdir(k_mv_dir) != 1) {
+      vfstest_fail("mkdir MVLAB");
+      return;
+    }
+    if (!vfs_cd(k_mv_dir)) {
+      vfstest_fail("cd MVLAB");
+      return;
+    }
+    n = vfs_write(k_mv_src, (const uint8_t *)k_mv_data,
+                  (uint32_t)str_len(k_mv_data));
+    if (n != (int)str_len(k_mv_data)) {
+      vfstest_fail("write SRC.TXT");
+      return;
+    }
+    if (vfs_mv(k_mv_src, k_mv_dst) != 1) {
+      vfstest_fail("mv SRC.TXT DST.TXT");
+      return;
+    }
+    n = vfs_cat(k_mv_dst, buf, (int)sizeof(buf));
+    if (!buffer_equals(buf, n, k_mv_data)) {
+      vfstest_fail("read DST.TXT");
+      return;
+    }
+    if (vfs_rm_force(k_mv_dst) != 1) {
+      vfstest_fail("rm DST.TXT");
+      return;
+    }
+    if (!vfs_cd("/ROOT")) {
+      vfstest_fail("cd /ROOT after MVLAB");
+      return;
+    }
+    if (vfs_rmdir(k_mv_dir) != 1) {
+      vfstest_fail("rmdir MVLAB");
+      return;
+    }
   }
 
   n = vfs_write(k_root_name, (const uint8_t *)k_root_data_a,
@@ -782,7 +1304,7 @@ static void cmd_vfstest(int argc, char *argv[]) {
     return;
   }
 
-  if (vfs_rm(k_inner_name) != 1) {
+  if (vfs_rm_force(k_inner_name) != 1) {
     vfstest_fail("rm INNER.TXT");
     return;
   }
@@ -797,7 +1319,7 @@ static void cmd_vfstest(int argc, char *argv[]) {
     return;
   }
 
-  if (vfs_rm(k_root_name) != 1) {
+  if (vfs_rm_force(k_root_name) != 1) {
     vfstest_fail("rm RWTEST.TXT");
     return;
   }

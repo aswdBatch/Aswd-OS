@@ -14,3 +14,5 @@ uint32_t multiboot_fb_width(void);
 uint32_t multiboot_fb_height(void);
 uint8_t  multiboot_fb_bpp(void);
 
+/** Multiboot cmdline contained standalone token "quiet" (less boot UI / serial noise). */
+int multiboot_boot_quiet(void);

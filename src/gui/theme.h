@@ -4,31 +4,35 @@
 
 #include "drivers/gfx.h"
 
-#define TH_BG_DEEP      gfx_rgb(15,  23,  38)
-#define TH_BG_PANEL     gfx_rgb(245, 248, 252)
-#define TH_BG_CONTENT   gfx_rgb(249, 250, 253)
-#define TH_BG_ROW_ALT   gfx_rgb(236, 242, 250)
-#define TH_BG_FIELD     gfx_rgb(243, 246, 251)
+#define TH_BG_DEEP      gfx_rgb(224, 231, 241)
+#define TH_BG_PANEL     gfx_rgb(248, 250, 253)
+#define TH_BG_CONTENT   gfx_rgb(252, 253, 255)
+#define TH_BG_ROW_ALT   gfx_rgb(242, 246, 252)
+#define TH_BG_FIELD     gfx_rgb(245, 248, 252)
 #define TH_BG_CARD      gfx_rgb(255, 255, 255)
-#define TH_BG_CARD_ALT  gfx_rgb(237, 243, 251)
-#define TH_BG_SIDEBAR   gfx_rgb(238, 243, 249)
-#define TH_BG_TOOLBAR   gfx_rgb(28,  77, 140)
-#define TH_BG_STATUS    gfx_rgb(232, 238, 247)
-#define TH_ACCENT       gfx_rgb(30,  106, 196)
-#define TH_ACCENT_HOT   gfx_rgb(45,  121, 224)
-#define TH_ACCENT_DARK  gfx_rgb(22,  86,  164)
-#define TH_TEXT         gfx_rgb(20,  31,  48)
-#define TH_TEXT_DIM     gfx_rgb(96,  109, 130)
+#define TH_BG_CARD_ALT  gfx_rgb(245, 248, 253)
+#define TH_BG_SIDEBAR   gfx_rgb(243, 247, 251)
+#define TH_BG_TOOLBAR   gfx_rgb(243, 247, 252)
+#define TH_BG_STATUS    gfx_rgb(240, 245, 250)
+#define TH_ACCENT       gfx_rgb(50,  112, 204)
+#define TH_ACCENT_HOT   gfx_rgb(72,  135, 226)
+#define TH_ACCENT_DARK  gfx_rgb(38,  94, 178)
+/* Stronger body contrast (readable on light surfaces / Win-style chrome) */
+#define TH_TEXT         gfx_rgb(15, 23, 42)
+#define TH_TEXT_DIM     gfx_rgb(71, 85, 105)
 #define TH_TEXT_INVERT  gfx_rgb(255, 255, 255)
-#define TH_BORDER       gfx_rgb(77,  92, 118)
-#define TH_RULE         gfx_rgb(208, 218, 230)
-#define TH_FIELD_EDGE   gfx_rgb(169, 186, 210)
-#define TH_FIELD_FOCUS  gfx_rgb(61,  126, 218)
+/* Tray / dark taskbar typography */
+#define TH_TEXT_ON_DARK      gfx_rgb(236, 242, 255)
+#define TH_TEXT_ON_DARK_DIM  gfx_rgb(156, 168, 188)
+#define TH_BORDER       gfx_rgb(205, 214, 227)
+#define TH_RULE         gfx_rgb(224, 231, 240)
+#define TH_FIELD_EDGE   gfx_rgb(203, 214, 228)
+#define TH_FIELD_FOCUS  gfx_rgb(86,  141, 224)
 #define TH_STATUS_ERR   gfx_rgb(180, 52,  72)
-#define TH_DANGER_BG    gfx_rgb(140, 30,  30)
-#define TH_DANGER_TEXT  gfx_rgb(255, 200, 200)
-#define TH_SEL_BG       gfx_rgb(34,  107, 207)
-#define TH_SEL_TXT      gfx_rgb(255, 255, 255)
+#define TH_DANGER_BG    gfx_rgb(186, 66,  84)
+#define TH_DANGER_TEXT  gfx_rgb(255, 236, 240)
+#define TH_SEL_BG       gfx_rgb(225, 236, 252)
+#define TH_SEL_TXT      gfx_rgb(15, 23, 42)
 
 typedef struct {
     int gap_xs;
@@ -83,6 +87,10 @@ int  th_fit_aspect_rect(int outer_x, int outer_y, int outer_w, int outer_h,
                         int *out_x, int *out_y, int *out_w, int *out_h);
 
 void th_draw_surface(int x, int y, int w, int h, uint32_t bg);
+void th_fill_rounded(int x, int y, int w, int h, int radius, uint32_t color);
+void th_fill_rounded_alpha(int x, int y, int w, int h, int radius, uint32_t color, uint8_t alpha);
+void th_draw_rounded_outline(int x, int y, int w, int h, int radius, uint32_t color);
+void th_draw_soft_shadow(int x, int y, int w, int h, int radius);
 void th_draw_panel(int x, int y, int w, int h, const char *header);
 void th_draw_dialog(int x, int y, int w, int h, const char *title);
 void th_draw_card(int x, int y, int w, int h, const char *title, uint32_t bg, int active);

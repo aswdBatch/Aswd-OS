@@ -104,14 +104,13 @@ static void shell_gui_on_paint(int win_id) {
     gui_rect_t r = gui_window_content(win_id);
     const th_metrics_t *tm = th_metrics();
     if (g_wc) {
-        int head_h = tm->toolbar_h;
+        int head_h = 0;
         int status_h = tm->status_h;
         int body_y = r.y + head_h;
         int body_h = r.h - head_h - status_h;
 
-        th_draw_toolbar(r.x, r.y, r.w, "Terminal");
         th_draw_statusbar(r.x, r.y + r.h - status_h, r.w, status_h,
-                          "AswdOS terminal. Ctrl+Q closes.");
+                          "Ctrl+Q closes.");
         gfx_fill_rect(r.x, body_y, r.w, body_h, gfx_rgb(0, 0, 0));
         wc_resize(g_wc, r.w, body_h);
         wc_paint(g_wc, r.x, body_y);
@@ -212,10 +211,10 @@ void shell_gui_launch(void) {
         return;
     }
 
-    gui_window_suggest_rect(720, 500, &rect);
+    gui_window_suggest_rect(680, 420, &rect);
     wid = gui_window_create("Terminal", rect.x, rect.y, rect.w, rect.h);
     if (wid < 0) return;
-    gui_window_set_min_size(wid, 520, 340);
+    gui_window_set_min_size(wid, 500, 320);
 
     g_wc = wc_alloc();
     if (!g_wc) { gui_window_close(wid); return; }
@@ -234,9 +233,7 @@ void shell_gui_launch(void) {
 
     reset_line();
 
-    wc_set_color(g_wc, VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
-    wc_write(g_wc, "AswdOS Terminal\n");
     wc_set_color(g_wc, VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    wc_write(g_wc, "Type 'help' for commands. Ctrl+Q to close.\n\n");
+    wc_write(g_wc, "Type 'help' for commands.\n\n");
     print_prompt();
 }

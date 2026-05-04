@@ -1,5 +1,7 @@
 #include "boot/multiboot.h"
 
+#include "lib/string.h"
+
 enum { MULTIBOOT_BOOTLOADER_MAGIC = 0x2BADB002 };
 
 typedef struct __attribute__((packed)) {
@@ -45,6 +47,34 @@ static uint32_t g_fb_width = 0;
 static uint32_t g_fb_height = 0;
 static uint8_t  g_fb_bpp = 0;
 
+static int g_boot_quiet = 0;
+
+static int cmdline_has_quiet_token(const char *cmdline) {
+  const char *p;
+  if (!cmdline) {
+    return 0;
+  }
+  for (p = cmdline; *p;) {
+    const char *start;
+    unsigned tok_len;
+    while (*p == ' ' || *p == '\t') {
+      p++;
+    }
+    if (*p == '\0') {
+      break;
+    }
+    start = p;
+    while (*p && *p != ' ' && *p != '\t') {
+      p++;
+    }
+    tok_len = (unsigned)(p - start);
+    if (tok_len == 5u && str_ncmp(start, "quiet", 5) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 void multiboot_init(uint32_t magic, uint32_t addr) {
   g_magic = magic;
   g_addr = addr;
@@ -52,12 +82,20 @@ void multiboot_init(uint32_t magic, uint32_t addr) {
   g_mem_lower = 0;
   g_mem_upper = 0;
   g_has_fb = 0;
+  g_boot_quiet = 0;
 
   if (g_magic != MULTIBOOT_BOOTLOADER_MAGIC) {
     return;
   }
 
   const multiboot_info_t *info = (const multiboot_info_t *)(uintptr_t)g_addr;
+
+  if (info->flags & 0x4u) {
+    const char *cmd = (const char *)(uintptr_t)info->cmdline;
+    if (cmdline_has_quiet_token(cmd)) {
+      g_boot_quiet = 1;
+    }
+  }
 
   if (info->flags & 0x1u) {
     g_mem_lower = info->mem_lower;
@@ -112,3 +150,6 @@ uint8_t multiboot_fb_bpp(void) {
   return g_fb_bpp;
 }
 
+int multiboot_boot_quiet(void) {
+  return g_boot_quiet;
+}

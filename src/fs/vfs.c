@@ -1,7 +1,15 @@
 #include "fs/vfs.h"
 
+#include "common/config.h"
 #include "drivers/fat32.h"
+#include "drivers/serial.h"
 #include "lib/string.h"
+
+#if FAT_DEBUG_SERIAL
+#define VFS_TRACE(msg) serial_write(msg)
+#else
+#define VFS_TRACE(msg) ((void)0)
+#endif
 
 static int      g_ready = 0;
 static uint32_t g_cwd_cluster;
@@ -11,6 +19,57 @@ static int      g_write_guard_enabled = 0;
 #define VFS_MAX_DEPTH 8
 #define VFS_WORKSPACE_NAME "ROOT"
 #define VFS_WORKSPACE_PATH "/ROOT"
+#define VFS_RECYCLE_NAME   "RECYCLE.BIN"
+
+static uint32_t vfs_workspace_dir_cluster(void) {
+    fat32_entry_t ws;
+
+    if (fat32_find_entry(fat32_get_root_cluster(), VFS_WORKSPACE_NAME, &ws) <= 0 ||
+        !ws.is_dir) {
+        return 0;
+    }
+    return ws.cluster;
+}
+
+static void vfs_ensure_recycle_bin(void) {
+    uint32_t wc = vfs_workspace_dir_cluster();
+    fat32_entry_t rb;
+
+    if (!wc) {
+        return;
+    }
+    if (fat32_find_entry(wc, VFS_RECYCLE_NAME, &rb) > 0) {
+        return;
+    }
+    (void)fat32_mkdir(wc, VFS_RECYCLE_NAME);
+}
+
+static void vfs_recycle_leaf_name(const char *orig_leaf, char out[13]) {
+    static uint32_t g_seq = 1u;
+    char stem[16];
+    char num[12];
+    const char *dot;
+
+    stem[0] = 'R';
+    u32_to_dec(g_seq++, num, sizeof(num));
+    str_copy(stem + 1, num, sizeof(stem) - 1);
+    stem[8] = '\0';
+
+    dot = (void *)0;
+    {
+        int i;
+        for (i = 0; orig_leaf[i]; i++) {
+            if (orig_leaf[i] == '.') {
+                dot = orig_leaf + i;
+            }
+        }
+    }
+
+    str_copy(out, stem, 13);
+    if (dot && dot[1]) {
+        str_cat(out, dot, 13);
+    }
+}
 
 typedef struct {
     uint32_t cluster;
@@ -282,6 +341,8 @@ int vfs_init(void) {
         return 0;
     }
 
+    vfs_ensure_recycle_bin();
+
     g_write_guard_enabled = 1;
     return 1;
 }
@@ -361,6 +422,7 @@ int vfs_write(const char *name, const uint8_t *data, uint32_t size) {
     vfs_dir_state_t parent;
     char leaf[13];
 
+    VFS_TRACE("[vfs] vfs_write\n");
     if (!g_ready) {
         return -1;
     }
@@ -376,7 +438,41 @@ int vfs_write(const char *name, const uint8_t *data, uint32_t size) {
 int vfs_rm(const char *name) {
     vfs_dir_state_t parent;
     char leaf[13];
+    fat32_entry_t recycle_bin;
+    fat32_entry_t clash;
+    uint32_t wc;
+    char rleaf[13];
 
+    if (!g_ready) {
+        return -1;
+    }
+    if (!split_parent_leaf(name, &parent, leaf, sizeof(leaf))) {
+        return -1;
+    }
+    if (g_write_guard_enabled && !path_is_under_workspace(parent.path)) {
+        return -1;
+    }
+
+    vfs_ensure_recycle_bin();
+    wc = vfs_workspace_dir_cluster();
+    if (!wc || fat32_find_entry(wc, VFS_RECYCLE_NAME, &recycle_bin) <= 0 ||
+        !recycle_bin.is_dir) {
+        return fat32_delete_entry(parent.cluster, leaf);
+    }
+
+    vfs_recycle_leaf_name(leaf, rleaf);
+    if (fat32_find_entry(recycle_bin.cluster, rleaf, &clash) > 0) {
+        return fat32_delete_entry(parent.cluster, leaf);
+    }
+
+    return fat32_move_entry(parent.cluster, leaf, recycle_bin.cluster, rleaf);
+}
+
+int vfs_rm_force(const char *name) {
+    vfs_dir_state_t parent;
+    char leaf[13];
+
+    VFS_TRACE("[vfs] vfs_rm_force\n");
     if (!g_ready) {
         return -1;
     }
@@ -393,6 +489,7 @@ int vfs_mkdir(const char *name) {
     vfs_dir_state_t parent;
     char leaf[13];
 
+    VFS_TRACE("[vfs] vfs_mkdir\n");
     if (!g_ready) {
         return -1;
     }
@@ -419,4 +516,93 @@ int vfs_rmdir(const char *name) {
         return -1;
     }
     return fat32_rmdir(parent.cluster, leaf);
+}
+
+int vfs_mv(const char *src, const char *dst) {
+    vfs_dir_state_t sp;
+    vfs_dir_state_t dp;
+    char sleaf[13];
+    char dleaf[13];
+
+    if (!g_ready) {
+        return -1;
+    }
+    if (!split_parent_leaf(src, &sp, sleaf, sizeof(sleaf))) {
+        return -1;
+    }
+    if (g_write_guard_enabled && !path_is_under_workspace(sp.path)) {
+        return -1;
+    }
+
+    if (split_parent_leaf(dst, &dp, dleaf, sizeof(dleaf))) {
+        fat32_entry_t maybe_dir;
+        if (g_write_guard_enabled && !path_is_under_workspace(dp.path)) {
+            return -1;
+        }
+        if (fat32_find_entry(dp.cluster, dleaf, &maybe_dir) > 0 && maybe_dir.is_dir) {
+            return fat32_move_entry(sp.cluster, sleaf, maybe_dir.cluster, sleaf);
+        }
+        return fat32_move_entry(sp.cluster, sleaf, dp.cluster, dleaf);
+    }
+
+    if (!resolve_directory(dst, &dp)) {
+        return -1;
+    }
+    if (g_write_guard_enabled && !path_is_under_workspace(dp.path)) {
+        return -1;
+    }
+    return fat32_move_entry(sp.cluster, sleaf, dp.cluster, sleaf);
+}
+
+int vfs_cp(const char *src, const char *dst, int recursive) {
+    vfs_dir_state_t sp;
+    vfs_dir_state_t dp;
+    char sleaf[13];
+    char dleaf[13];
+    fat32_entry_t src_ent;
+
+    if (!g_ready) {
+        return -1;
+    }
+    if (!split_parent_leaf(src, &sp, sleaf, sizeof(sleaf))) {
+        return -1;
+    }
+    if (fat32_find_entry(sp.cluster, sleaf, &src_ent) <= 0) {
+        return -1;
+    }
+
+    if (g_write_guard_enabled && !path_is_under_workspace(sp.path)) {
+        return -1;
+    }
+
+    if (split_parent_leaf(dst, &dp, dleaf, sizeof(dleaf))) {
+        fat32_entry_t maybe_dir;
+        if (fat32_find_entry(dp.cluster, dleaf, &maybe_dir) > 0 && maybe_dir.is_dir) {
+            if (!src_ent.is_dir) {
+                return fat32_copy_file(sp.cluster, sleaf, maybe_dir.cluster, sleaf);
+            }
+            if (!recursive) {
+                return -1;
+            }
+            return fat32_copy_dir_recursive(src_ent.cluster, maybe_dir.cluster, sleaf);
+        }
+        if (src_ent.is_dir) {
+            return -1;
+        }
+        return fat32_copy_file(sp.cluster, sleaf, dp.cluster, dleaf);
+    }
+
+    if (!resolve_directory(dst, &dp)) {
+        return -1;
+    }
+    if (g_write_guard_enabled && !path_is_under_workspace(dp.path)) {
+        return -1;
+    }
+    if (!src_ent.is_dir) {
+        return fat32_copy_file(sp.cluster, sleaf, dp.cluster, sleaf);
+    }
+    if (!recursive) {
+        return -1;
+    }
+    return fat32_copy_dir_recursive(src_ent.cluster, dp.cluster, sleaf);
 }

@@ -15,10 +15,11 @@ typedef struct {
     uint8_t pressed;
     uint8_t released;
     uint8_t source;
+    int8_t wheel; /* vertical scroll delta */
 } mouse_event_t;
 
 int     mouse_init(void);  /* returns 1 if mouse found, 0 if not */
-void    mouse_push_usb_event(int dx, int dy, uint8_t buttons);
+void    mouse_push_usb_event(int dx, int dy, uint8_t buttons, int8_t wheel);
 void    mouse_set_bounds(int width, int height);
 void    mouse_irq_handler(void);
 int     mouse_poll(mouse_event_t *out);

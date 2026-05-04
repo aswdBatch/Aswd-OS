@@ -3,8 +3,10 @@
 #include <stdint.h>
 
 #include "console/console.h"
+#include "fs/vfs.h"
 #include "input/input.h"
 #include "lib/string.h"
+#include "net/http.h"
 #include "shell/commands.h"
 
 /* ---- Value type ---- */
@@ -164,6 +166,7 @@ static void print_val(lang_val_t v) {
 
 /* ---- Main evaluator ---- */
 static lang_val_t eval_node(int16_t idx);
+static int eval_try_builtin(uint16_t name_id, int16_t arg_head, lang_val_t *out);
 
 static lang_val_t eval_node(int16_t idx) {
     lang_node_t *nd;
@@ -285,6 +288,10 @@ static lang_val_t eval_node(int16_t idx) {
     }
 
     case N_CALL: {
+        lang_val_t bret;
+        if (eval_try_builtin(nd->sval, nd->left, &bret)) {
+            return bret;
+        }
         fn_entry_t *fn = fn_find(nd->sval);
         int16_t arg_node;
         int16_t param_node;
@@ -374,6 +381,134 @@ void lang_eval(int16_t block) {
         eval_node(bn->left);
         cur = bn->right;
     }
+}
+
+static int eval_try_builtin(uint16_t name_id, int16_t arg_head, lang_val_t *out) {
+    const char *fn = sp_get(name_id);
+    lang_val_t av[4];
+    int ac = 0;
+    int16_t an = arg_head;
+
+    while (an >= 0 && ac < 4) {
+        av[ac] = eval_node(g_nodes[an].left);
+        if (g_lang_error) {
+            return 0;
+        }
+        ac++;
+        an = g_nodes[an].right;
+    }
+
+    if (str_eq(fn, "files.read")) {
+        uint8_t buf[4096];
+        int n;
+        if (ac < 1 || av[0].type != VAL_STR) {
+            lang_error(0, "files.read needs string path");
+            return 0;
+        }
+        n = vfs_cat(sp_get(av[0].s), buf, (int)sizeof(buf) - 1);
+        if (n < 0) {
+            lang_error(0, "files.read failed");
+            return 0;
+        }
+        buf[n] = '\0';
+        *out = make_str(sp_add((char *)buf, n));
+        return 1;
+    }
+
+    if (str_eq(fn, "files.write")) {
+        if (ac < 2 || av[0].type != VAL_STR || av[1].type != VAL_STR) {
+            lang_error(0, "files.write(path, text)");
+            return 0;
+        }
+        {
+            const char *p = sp_get(av[0].s);
+            const char *t = sp_get(av[1].s);
+            int w = vfs_write(p, (const uint8_t *)t, (uint32_t)str_len(t));
+            if (w < 0) {
+                lang_error(0, "files.write failed");
+                return 0;
+            }
+        }
+        *out = make_int(1);
+        return 1;
+    }
+
+    if (str_eq(fn, "files.list")) {
+        char cwd_saved[256];
+        fat32_entry_t list[48];
+        int n;
+        int i;
+
+        str_copy(cwd_saved, vfs_cwd_path(), sizeof(cwd_saved));
+        if (ac >= 1 && av[0].type == VAL_STR) {
+            if (!vfs_cd(sp_get(av[0].s))) {
+                lang_error(0, "files.list cd failed");
+                (void)vfs_cd(cwd_saved);
+                return 0;
+            }
+        }
+        n = vfs_ls(list, (int)(sizeof(list) / sizeof(list[0])));
+        if (n < 0) {
+            lang_error(0, "files.list failed");
+            (void)vfs_cd(cwd_saved);
+            return 0;
+        }
+        g_str_tmp[0] = '\0';
+        for (i = 0; i < n; i++) {
+            if (i) str_cat(g_str_tmp, ", ", sizeof(g_str_tmp));
+            str_cat(g_str_tmp, list[i].name, sizeof(g_str_tmp));
+        }
+        (void)vfs_cd(cwd_saved);
+        *out = make_str(sp_add(g_str_tmp, (int)str_len(g_str_tmp)));
+        return 1;
+    }
+
+    if (str_eq(fn, "net.get")) {
+        static char body[2048];
+        int st = 0;
+        int r;
+        if (ac < 1 || av[0].type != VAL_STR) {
+            lang_error(0, "net.get(url)");
+            return 0;
+        }
+        r = http_get(sp_get(av[0].s), body, (uint16_t)sizeof(body), &st);
+        if (r < 0 || st != 200) {
+            lang_error(0, "net.get failed");
+            return 0;
+        }
+        *out = make_str(sp_add(body, r));
+        return 1;
+    }
+
+    if (str_eq(fn, "ui.alert")) {
+        if (ac < 1 || av[0].type != VAL_STR) {
+            lang_error(0, "ui.alert(msg)");
+            return 0;
+        }
+        console_writeln(sp_get(av[0].s));
+        *out = make_nil();
+        return 1;
+    }
+
+    if (str_eq(fn, "sys.exec")) {
+        char cmd_buf[256];
+        char *argv_arr[16];
+        int argc;
+        if (ac < 1 || av[0].type != VAL_STR) {
+            lang_error(0, "sys.exec(cmd)");
+            return 0;
+        }
+        str_copy(cmd_buf, sp_get(av[0].s), sizeof(cmd_buf));
+        argc = split_args(cmd_buf, argv_arr, 16);
+        if (argc > 0) {
+            commands_dispatch(argc, argv_arr);
+        }
+        *out = make_nil();
+        return 1;
+    }
+
+    (void)out;
+    return 0;
 }
 
 /* Reset evaluator globals before each run; called from lang.c. */

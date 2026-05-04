@@ -46,6 +46,34 @@ static void usb_attach_controller(usb_controller_t *ctrl) {
   }
 }
 
+static int usb_kind_rank(usb_controller_kind_t k) {
+  switch (k) {
+    case USB_CTRL_UHCI: return 0;
+    case USB_CTRL_OHCI: return 1;
+    case USB_CTRL_EHCI: return 2;
+    case USB_CTRL_XHCI: return 3;
+    default: return 99;
+  }
+}
+
+static void usb_sort_controllers(int n) {
+  int i;
+  int j;
+
+  for (i = 0; i < n - 1; i++) {
+    for (j = 0; j < n - 1 - i; j++) {
+      int rj = usb_kind_rank(g_controllers[j].kind);
+      int rjn = usb_kind_rank(g_controllers[j + 1].kind);
+
+      if (rj > rjn) {
+        usb_controller_t tmp = g_controllers[j];
+        g_controllers[j] = g_controllers[j + 1];
+        g_controllers[j + 1] = tmp;
+      }
+    }
+  }
+}
+
 static int usb_collect_controller(const pci_device_t *dev, void *ctx) {
   int *count = (int *)ctx;
   usb_controller_t *ctrl;
@@ -71,7 +99,6 @@ static int usb_collect_controller(const pci_device_t *dev, void *ctx) {
   ctrl->supports_control = 0;
   ctrl->supports_interrupt = 0;
   ctrl->supports_bulk = 0;
-  usb_attach_controller(ctrl);
   (*count)++;
   return 0;
 }
@@ -103,7 +130,14 @@ void usb_init(void) {
   g_status.active_pointer_source = 0;
 
   pci_enumerate(usb_collect_controller, &count);
+  usb_sort_controllers(count);
   g_status.controller_count = count;
+  {
+    int ci;
+    for (ci = 0; ci < count; ci++) {
+      usb_attach_controller(&g_controllers[ci]);
+    }
+  }
   usb_hid_init();
 }
 
@@ -135,6 +169,8 @@ void usb_poll(void) {
     usb_controller_t *ctrl = &g_controllers[i];
     if (ctrl->kind == USB_CTRL_UHCI) {
       uhci_poll(ctrl);
+    } else if (ctrl->kind == USB_CTRL_EHCI) {
+      ehci_poll(ctrl);
     }
   }
 }

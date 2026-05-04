@@ -20,10 +20,10 @@
 #define FRAME_PAD_R 10
 #define FRAME_PAD_B 10
 
-#define COL_PANEL_EDGE gfx_rgb(70, 82, 102)
-#define COL_PANEL_BG_TOP gfx_rgb(248, 250, 253)
-#define COL_PANEL_BG_BOTTOM gfx_rgb(233, 238, 246)
-#define COL_PANEL_RULE gfx_rgb(201, 211, 224)
+#define COL_PANEL_EDGE gfx_rgb(205, 214, 227)
+#define COL_PANEL_BG_TOP gfx_rgb(251, 253, 255)
+#define COL_PANEL_BG_BOTTOM gfx_rgb(242, 246, 251)
+#define COL_PANEL_RULE gfx_rgb(224, 231, 240)
 #define COL_TEXT gfx_rgb(33, 44, 60)
 #define COL_TEXT_DIM gfx_rgb(98, 112, 133)
 #define COL_TEXT_HINT gfx_rgb(118, 134, 156)
@@ -222,76 +222,76 @@ static void fill_gradient_v_clipped(int x, int y, int w, int h,
 static void auth_palette_for_theme(auth_palette_t *out) {
     gui_background_theme_t theme = gui_get_background_theme();
 
-    out->row_bg = gfx_rgb(247, 249, 252);
+    out->row_bg = gfx_rgb(249, 251, 253);
     out->row_edge = gfx_rgb(211, 219, 231);
-    out->focus_edge = gfx_rgb(54, 122, 214);
+    out->focus_edge = gfx_rgb(86, 141, 224);
 
     switch (theme) {
         case GUI_BG_THEME_GLASS:
-            out->bg_top = gfx_rgb(24, 72, 118);
-            out->bg_bottom = gfx_rgb(10, 19, 31);
-            out->band_top = gfx_rgb(44, 110, 190);
-            out->band_bottom = gfx_rgb(20, 48, 82);
-            out->floor_top = gfx_rgb(27, 40, 58);
-            out->floor_bottom = gfx_rgb(13, 20, 28);
-            out->accent_top = gfx_rgb(81, 161, 245);
-            out->accent_bottom = gfx_rgb(33, 112, 194);
+            out->bg_top = gfx_rgb(239, 245, 252);
+            out->bg_bottom = gfx_rgb(226, 234, 246);
+            out->band_top = gfx_rgb(205, 226, 250);
+            out->band_bottom = gfx_rgb(229, 240, 252);
+            out->floor_top = gfx_rgb(235, 241, 249);
+            out->floor_bottom = gfx_rgb(223, 232, 243);
+            out->accent_top = gfx_rgb(99, 157, 221);
+            out->accent_bottom = gfx_rgb(67, 123, 194);
             break;
         case GUI_BG_THEME_STUDIO:
-            out->bg_top = gfx_rgb(44, 47, 78);
-            out->bg_bottom = gfx_rgb(15, 15, 24);
-            out->band_top = gfx_rgb(104, 75, 164);
-            out->band_bottom = gfx_rgb(48, 37, 81);
-            out->floor_top = gfx_rgb(33, 28, 42);
-            out->floor_bottom = gfx_rgb(16, 13, 20);
-            out->accent_top = gfx_rgb(144, 102, 228);
-            out->accent_bottom = gfx_rgb(86, 62, 156);
+            out->bg_top = gfx_rgb(245, 242, 252);
+            out->bg_bottom = gfx_rgb(233, 230, 244);
+            out->band_top = gfx_rgb(227, 215, 246);
+            out->band_bottom = gfx_rgb(242, 236, 250);
+            out->floor_top = gfx_rgb(237, 233, 246);
+            out->floor_bottom = gfx_rgb(228, 224, 240);
+            out->accent_top = gfx_rgb(129, 139, 220);
+            out->accent_bottom = gfx_rgb(96, 109, 188);
             break;
         case GUI_BG_THEME_SUNSET:
-            out->bg_top = gfx_rgb(120, 63, 50);
-            out->bg_bottom = gfx_rgb(28, 14, 24);
-            out->band_top = gfx_rgb(189, 105, 66);
-            out->band_bottom = gfx_rgb(86, 39, 44);
-            out->floor_top = gfx_rgb(46, 28, 31);
-            out->floor_bottom = gfx_rgb(21, 12, 17);
-            out->accent_top = gfx_rgb(223, 128, 92);
-            out->accent_bottom = gfx_rgb(172, 73, 78);
+            out->bg_top = gfx_rgb(252, 244, 238);
+            out->bg_bottom = gfx_rgb(244, 231, 226);
+            out->band_top = gfx_rgb(248, 221, 203);
+            out->band_bottom = gfx_rgb(252, 237, 232);
+            out->floor_top = gfx_rgb(243, 234, 230);
+            out->floor_bottom = gfx_rgb(237, 226, 222);
+            out->accent_top = gfx_rgb(206, 141, 118);
+            out->accent_bottom = gfx_rgb(176, 112, 98);
             break;
         case GUI_BG_THEME_OCEAN:
-            out->bg_top = gfx_rgb(16, 82, 94);
-            out->bg_bottom = gfx_rgb(7, 18, 27);
-            out->band_top = gfx_rgb(27, 138, 149);
-            out->band_bottom = gfx_rgb(12, 58, 66);
-            out->floor_top = gfx_rgb(23, 37, 43);
-            out->floor_bottom = gfx_rgb(10, 18, 21);
-            out->accent_top = gfx_rgb(43, 176, 188);
-            out->accent_bottom = gfx_rgb(16, 124, 136);
+            out->bg_top = gfx_rgb(238, 248, 249);
+            out->bg_bottom = gfx_rgb(224, 238, 241);
+            out->band_top = gfx_rgb(202, 234, 236);
+            out->band_bottom = gfx_rgb(232, 247, 247);
+            out->floor_top = gfx_rgb(233, 242, 244);
+            out->floor_bottom = gfx_rgb(224, 236, 239);
+            out->accent_top = gfx_rgb(98, 167, 190);
+            out->accent_bottom = gfx_rgb(67, 138, 164);
             break;
         case GUI_BG_THEME_NEUTRAL:
-            out->bg_top = gfx_rgb(74, 82, 95);
-            out->bg_bottom = gfx_rgb(14, 18, 24);
-            out->band_top = gfx_rgb(129, 143, 164);
-            out->band_bottom = gfx_rgb(55, 65, 78);
-            out->floor_top = gfx_rgb(33, 38, 46);
-            out->floor_bottom = gfx_rgb(17, 20, 26);
-            out->accent_top = gfx_rgb(102, 153, 214);
-            out->accent_bottom = gfx_rgb(58, 108, 171);
+            out->bg_top = gfx_rgb(242, 245, 250);
+            out->bg_bottom = gfx_rgb(229, 234, 242);
+            out->band_top = gfx_rgb(220, 226, 237);
+            out->band_bottom = gfx_rgb(240, 244, 250);
+            out->floor_top = gfx_rgb(234, 238, 244);
+            out->floor_bottom = gfx_rgb(225, 231, 239);
+            out->accent_top = gfx_rgb(99, 145, 205);
+            out->accent_bottom = gfx_rgb(68, 115, 178);
             break;
         case GUI_BG_THEME_MINT:
         default:
-            out->bg_top = gfx_rgb(28, 78, 70);
-            out->bg_bottom = gfx_rgb(9, 18, 24);
-            out->band_top = gfx_rgb(48, 124, 102);
-            out->band_bottom = gfx_rgb(20, 50, 48);
-            out->floor_top = gfx_rgb(24, 41, 46);
-            out->floor_bottom = gfx_rgb(11, 18, 22);
-            out->accent_top = gfx_rgb(86, 176, 142);
-            out->accent_bottom = gfx_rgb(35, 115, 86);
+            out->bg_top = gfx_rgb(240, 247, 245);
+            out->bg_bottom = gfx_rgb(225, 236, 241);
+            out->band_top = gfx_rgb(208, 237, 226);
+            out->band_bottom = gfx_rgb(233, 246, 241);
+            out->floor_top = gfx_rgb(231, 241, 239);
+            out->floor_bottom = gfx_rgb(222, 235, 238);
+            out->accent_top = gfx_rgb(100, 159, 196);
+            out->accent_bottom = gfx_rgb(72, 130, 171);
             break;
     }
 
     out->accent_text = gfx_rgb(255, 255, 255);
-    out->accent_subtext = gfx_rgb(223, 233, 246);
+    out->accent_subtext = gfx_rgb(234, 241, 251);
     out->row_sel_top = out->accent_top;
     out->row_sel_bottom = out->accent_bottom;
     out->row_sel_edge = out->accent_bottom;
@@ -318,10 +318,9 @@ static void draw_brand_box(const gui_rect_t *rect,
                            const auth_palette_t *palette) {
     const th_metrics_t *tm = th_metrics();
 
-    gfx_fill_rect(rect->x, rect->y, rect->w, rect->h, palette->accent_bottom);
-    gfx_fill_rect_gradient_v(rect->x + 1, rect->y + 1, rect->w - 2, rect->h - 2,
-                             palette->accent_top, palette->accent_bottom);
-    gfx_fill_rect(rect->x + 1, rect->y + rect->h - 2, rect->w - 2, 1, gfx_rgb(12, 25, 42));
+    th_fill_rounded(rect->x, rect->y, rect->w, rect->h, 24, palette->accent_bottom);
+    th_fill_rounded_alpha(rect->x + 1, rect->y + 1, rect->w - 2, rect->h - 2,
+                          23, gfx_rgb(255, 255, 255), 28);
 
     gfx_draw_string_role_transparent(rect->x + 14, rect->y + 8,
                                      "AswdOS", FONT_ROLE_UI, tm->font_hero,
@@ -348,24 +347,23 @@ static void draw_panel_shell(const gui_rect_t *rect,
                              const char *subtitle,
                              const auth_palette_t *palette) {
     const th_metrics_t *tm = th_metrics();
+    (void)palette;
 
-    gfx_fill_rect(rect->x, rect->y, rect->w, rect->h, COL_PANEL_EDGE);
-    gfx_fill_rect_gradient_v(rect->x + 1, rect->y + 1, rect->w - 2, rect->h - 2,
-                             COL_PANEL_BG_TOP, COL_PANEL_BG_BOTTOM);
-    gfx_fill_rect_gradient_v(rect->x + 1, rect->y + 1, rect->w - 2, header_h,
-                             palette->accent_top, palette->accent_bottom);
-    gfx_fill_rect(rect->x + 1, rect->y + header_h, rect->w - 2, 1, COL_PANEL_RULE);
+    th_draw_soft_shadow(rect->x, rect->y, rect->w, rect->h, 26);
+    th_fill_rounded(rect->x, rect->y, rect->w, rect->h, 26, COL_PANEL_EDGE);
+    th_fill_rounded(rect->x + 1, rect->y + 1, rect->w - 2, rect->h - 2, 25, COL_PANEL_BG_TOP);
+    th_fill_rounded(rect->x + 1, rect->y + 1, rect->w - 2, header_h, 24, TH_BG_TOOLBAR);
+    gfx_fill_rect(rect->x + 20, rect->y + header_h, rect->w - 40, 1, COL_PANEL_RULE);
 
     gfx_draw_string_role_transparent(rect->x + PAD_X, rect->y + 10,
-                                     title, FONT_ROLE_UI, tm->font_title,
-                                     palette->accent_text);
+                                     title, FONT_ROLE_UI, tm->font_title, COL_TEXT);
     if (subtitle && subtitle[0]) {
         gfx_draw_string_role_transparent(rect->x + PAD_X,
                                          rect->y + 12 + tm->font_title,
                                          subtitle,
                                          FONT_ROLE_UI,
                                          tm->font_small,
-                                         palette->accent_subtext);
+                                         COL_TEXT_DIM);
     }
 }
 
@@ -380,14 +378,12 @@ static void draw_row_box(int x, int y, int w, int h,
     uint32_t dim = selected ? palette->row_sel_subtext : COL_TEXT_DIM;
     uint32_t bg = selected ? palette->row_sel_bottom : palette->row_bg;
 
-    gfx_fill_rect(x, y, w, h, edge);
+    th_fill_rounded(x, y, w, h, 14, edge);
     if (selected) {
-        gfx_fill_rect_gradient_v(x + 1, y + 1, w - 2, h - 2,
-                                 palette->row_sel_top, palette->row_sel_bottom);
-        gfx_fill_rect(x + 1, y + 1, 5, h - 2, gfx_rgb(255, 255, 255));
+        th_fill_rounded(x + 1, y + 1, w - 2, h - 2, 13, palette->row_sel_bottom);
+        th_fill_rounded_alpha(x + 1, y + 1, w - 2, h / 2, 13, gfx_rgb(255, 255, 255), 28);
     } else {
-        gfx_fill_rect(x + 1, y + 1, w - 2, h - 2, palette->row_bg);
-        gfx_fill_rect(x + 1, y + 1, 5, h - 2, gfx_rgb(214, 222, 233));
+        th_fill_rounded(x + 1, y + 1, w - 2, h - 2, 13, palette->row_bg);
     }
 
     gfx_draw_string_role_transparent(x + 14, y + 8, title, FONT_ROLE_UI, tm->font_body, text);
@@ -403,8 +399,8 @@ static void draw_field_box(int x, int y, int w, const char *text,
     int cursor_x = x + 10;
     int baseline_y = y + (fh - tm->font_body) / 2;
 
-    gfx_fill_rect(x, y, w, fh, focused ? focus_edge : COL_FIELD_EDGE);
-    gfx_fill_rect(x + 1, y + 1, w - 2, fh - 2, COL_FIELD_BG);
+    th_fill_rounded(x, y, w, fh, 12, focused ? focus_edge : COL_FIELD_EDGE);
+    th_fill_rounded(x + 1, y + 1, w - 2, fh - 2, 11, COL_FIELD_BG);
 
     for (int i = 0; text && text[i]; i++) {
         char c = masked ? '*' : text[i];
@@ -433,9 +429,8 @@ static void draw_button_box(int x, int y, int w, int h,
     int tx = x + (w - gfx_measure_text(FONT_ROLE_UI, tm->font_body, label)) / 2;
     int ty = y + (h - tm->font_body) / 2;
 
-    gfx_fill_rect(x, y, w, h, palette->accent_bottom);
-    gfx_fill_rect_gradient_v(x + 1, y + 1, w - 2, h - 2,
-                             palette->accent_top, palette->accent_bottom);
+    th_fill_rounded(x, y, w, h, 12, palette->accent_bottom);
+    th_fill_rounded_alpha(x + 1, y + 1, w - 2, h - 2, 11, gfx_rgb(255, 255, 255), 26);
     gfx_draw_string_role_transparent(tx, ty, label, FONT_ROLE_UI, tm->font_body,
                                      palette->accent_text);
 }

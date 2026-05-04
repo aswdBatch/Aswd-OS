@@ -148,8 +148,8 @@ void context_menu_paint(void) {
             }
             tx += icon_slot;
         }
-        gfx_draw_string_role_transparent(tx, iy + (row_h - m->font_body) / 2,
-                                         g_items[i].label, FONT_ROLE_UI, m->font_body, fg);
+        gfx_draw_string_role(tx, iy + (row_h - m->font_body) / 2,
+                             g_items[i].label, FONT_ROLE_UI, m->font_body, fg, row_bg);
     }
 }
 

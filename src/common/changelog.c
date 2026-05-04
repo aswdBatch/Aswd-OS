@@ -2,6 +2,133 @@
 
 static const changelog_entry_t g_entries[] = {
     {
+        "v0.9.1",
+        "2026-05-03",
+        "Usability contrast, GUI compositing, EHCI keyboard path, diagnostics.",
+        {
+            "Theme text defaults are darker; Start menu, popups, taskbar clock, and title bars use opaque draws so labels stay readable.",
+            "GUI invalidates drag/resize unions instead of full-frame blits; dirty present promotes to full swap when most pixels changed.",
+            "USB attach order prefers companion controllers (UHCI/OHCI) before EHCI; new EHCI driver enumerates HID boot keyboards on FS/LS root ports (best-effort). Shared usb_hid_boot_keyboard_process for UHCI/EHCI.",
+            "Compile-time FAT_DEBUG_SERIAL traces FAT flush and major VFS calls on serial; vfstest adds same-folder rename (mv) coverage.",
+            "Framebuffer commit logs when pitch exceeds packed width (linear FB stride padding).",
+        },
+        5,
+    },
+    {
+        "v0.9",
+        "2026-05-03",
+        "Mouse, filesystem, networking, AX builtins, shell tools, and boot polish.",
+        {
+            "PS/2 IntelliMouse wheel probing with 4-byte packets; USB HID boot-mouse parsing in hid.c and UHCI integration with scroll support.",
+            "Input pointer events carry wheel deltas; desktop cursor uses hotspot-aware overlay coordinates.",
+            "FAT32 entries expose last-write DOS timestamps; mkdir/write updates stamp fields; soft-delete moves files into /ROOT/RECYCLE.BIN (rm -f still deletes permanently).",
+            "Added vfs_mv/vfs_cp with fat32_move_entry, fat32_copy_file, and recursive fat32_copy_dir_recursive; shell cp/mv commands.",
+            "HTTP POST with redirects (301–308), DNS cache (10 hosts) with MRU promotion on hit, and http_proxy_connect_open for CONNECT tunnels (TLS still external).",
+            "AX lexer allows dotted identifiers; builtins files.read/write/list, net.get, ui.alert, and sys.exec.",
+            "Shell: find, grep, history, ln (unsupported notice), inspect, test (/ROOT/tests), compile stub, logs (boot trace).",
+            "USB init skipped when PCI reports no USB controller; early serial banner; boot_log ring for logs command; window-drag accent outline.",
+            "Multiboot kernel cmdline token quiet suppresses text-mode loading lines, boot_log capture, and the early serial ready banner; USB mouse TD clears report tail before HID parse to avoid stale wheel bytes.",
+        },
+        9,
+    },
+    {
+        "v0.8",
+        "2026-05-03",
+        "The shell can now report disk usage and show friendlier file sizes.",
+        {
+            "Added a df command that reports FAT32 total, used, and free space in both readable units and exact byte counts.",
+            "Added ls -s for human-readable file sizes while keeping the existing raw-byte ls output available by default.",
+        },
+        2,
+    },
+    {
+        "v0.8",
+        "2026-05-02",
+        "The build is clean again, with the DHCP buffer warnings and framebuffer access noise fixed.",
+        {
+            "Sized DHCP packet buffers from the actual packet struct so the compiler stops flagging out-of-bounds writes during discover, request, and release flows.",
+            "Removed an unused DHCP local and cleaned up the low-memory boot video access helpers so the graphics fallback path no longer throws the old fixed-address compiler warnings.",
+        },
+        2,
+    },
+    {
+        "v0.8",
+        "2026-05-02",
+        "Control Panel text spacing is cleaner, and the Network tab no longer mashes labels together.",
+        {
+            "Reflowed the Display profile block so Density stays inside its card instead of falling out of the bottom.",
+            "Cleaned up the Network tab text layout, replaced the broken separator glyphs with plain separators, and gave the Wi-Fi and Allowed sites sections more honest vertical spacing.",
+        },
+        2,
+    },
+    {
+        "v0.8",
+        "2026-05-02",
+        "Start is tighter, Control Panel fits better, and the shell does less oversized repaint work.",
+        {
+            "Compacted the Start button, Start menu, and quick-access rail so launcher content fits its space more honestly and stops crushing labels like Control Panel.",
+            "Made Control Panel open at a more usable size and rebuilt the Display tab layout so theme cards and display details stay inside the window body instead of spilling into each other.",
+            "Trimmed the terminal window defaults and reduced some shell invalidation paths so animated overlays and focused keyboard updates no longer always fall back to the heaviest full-screen present path.",
+        },
+        3,
+    },
+    {
+        "v0.8",
+        "2026-05-02",
+        "Terminal lost its duplicate heading, and Control Panel's display page now fits cleanly.",
+        {
+            "Removed the extra in-app Terminal heading so the window titlebar is the only title users see.",
+            "Compressed the Control Panel display theme cards and anchored the display-profile block underneath them so the page stops overlapping itself.",
+        },
+        2,
+    },
+    {
+        "v0.8",
+        "2026-05-02",
+        "Desktop icons now stay grouped together instead of stretching down the screen.",
+        {
+            "Reduced the desktop icon slot height, top margin, and vertical gap so the default app set packs tightly near the top-left corner.",
+            "This is a focused shell-layout fix aimed at the sparse desktop spacing problem.",
+        },
+        2,
+    },
+    {
+        "v0.8",
+        "2026-05-02",
+        "The desktop is now denser, clearer, and much less overwhelming on first boot.",
+        {
+            "Trimmed the default desktop down to the core everyday apps, keeping heavier tools available from Start without crowding the first screen.",
+            "Tightened desktop icon spacing, darkened labels, compacted the taskbar and Start menu, and toned down shell selection states so the workspace reads more clearly.",
+            "Reworked window chrome toward calmer controls with smaller neutral buttons and lighter shadows, which also cuts some repaint cost in software rendering.",
+            "Refit the Control Panel display page so theme cards and display details stay inside the window instead of colliding or spilling past the body area.",
+        },
+        4,
+    },
+    {
+        "v0.8",
+        "2026-05-02",
+        "The whole desktop now feels calmer, rounder, and easier to use, and boot gives you real time to press Space.",
+        {
+            "Reworked the shared UI styling toward a lighter minimal look with softer blue accents, rounded surfaces, gentler shadows, and cleaner spacing so the shell and apps feel more consistent.",
+            "Refreshed the desktop shell, taskbar, start menu, popups, and window chrome around that new rounded style instead of the older heavier glossy framing.",
+            "Updated the boot intro, loading screen, and boot chooser to match the calmer visual direction, and increased the Space-to-options window from about one second to about three seconds.",
+            "Login and first-boot setup now use the same softer visual system, with rounded cards, lighter panels, and cleaner account and input surfaces.",
+            "Fixed the Windows build path so object directories are created reliably before compilation, restoring clean ISO and USB image builds from scratch.",
+        },
+        5,
+    },
+    {
+        "v0.8",
+        "2026-04-30",
+        "Boot now reaches the desktop faster and opens with a more dramatic branded intro.",
+        {
+            "Replaced the old fixed boot pause with a short branded intro that still lets you press Space for boot options without waiting through a long idle splash.",
+            "Upgraded the boot loading screen with clearer stage labels and visible progress so storage, PCI, USB, network, and ready state feel alive instead of frozen.",
+            "PCI device discovery is now cached once during boot and reused by USB, wired networking, and later hardware probes, cutting repeated full-bus scans from the startup path.",
+        },
+        3,
+    },
+    {
         "v0.8",
         "2026-04-21",
         "Desktop rendering now uses dirty presents with frame stats and safer repaint flow.",

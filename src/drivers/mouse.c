@@ -9,6 +9,7 @@
 #include "drivers/serial.h"
 
 #define MOUSE_RING_SIZE 32
+#define PS2_PACKET_MAX  4
 
 static volatile int g_abs_x, g_abs_y;
 static volatile uint8_t g_btns;
@@ -20,11 +21,11 @@ static volatile uint32_t g_packet_errors;
 static int g_screen_w = 800;
 static int g_screen_h = 600;
 
-/* 3-byte packet assembly */
-static volatile uint8_t g_packet[3];
+static volatile uint8_t g_ps2_packet_target = 3;
+
+static volatile uint8_t g_packet[PS2_PACKET_MAX];
 static volatile int g_packet_idx;
 
-/* Ring buffer for events */
 static volatile mouse_event_t g_ring[MOUSE_RING_SIZE];
 static volatile int g_ring_head, g_ring_tail;
 
@@ -75,6 +76,48 @@ static int mouse_expect_ack(uint8_t cmd) {
     return 0;
 }
 
+static int mouse_try_intellimouse_wheel(void) {
+    if (!mouse_expect_ack(0xF3u) || !mouse_expect_ack(200u)) {
+        return 0;
+    }
+    if (!mouse_expect_ack(0xF3u) || !mouse_expect_ack(100u)) {
+        return 0;
+    }
+    if (!mouse_expect_ack(0xF3u) || !mouse_expect_ack(80u)) {
+        return 0;
+    }
+    if (!mouse_expect_ack(0xF2u)) {
+        return 0;
+    }
+    {
+        uint8_t id = 0;
+        if (!i8042_read_typed(1, &id, 200000u)) {
+            return 0;
+        }
+        return (id == 3u || id == 4u) ? 1 : 0;
+    }
+}
+
+static void ring_push(int dx, int dy, uint8_t prev_btns, uint8_t next_btns,
+                      int8_t wheel, uint8_t src) {
+    int next = (g_ring_head + 1) % MOUSE_RING_SIZE;
+    if (next == g_ring_tail) {
+        g_packet_errors++;
+        return;
+    }
+    g_ring[g_ring_head].dx = (int16_t)dx;
+    g_ring[g_ring_head].dy = (int16_t)dy;
+    g_ring[g_ring_head].x = (int16_t)g_abs_x;
+    g_ring[g_ring_head].y = (int16_t)g_abs_y;
+    g_ring[g_ring_head].buttons = next_btns;
+    g_ring[g_ring_head].changed = (uint8_t)(prev_btns ^ next_btns);
+    g_ring[g_ring_head].pressed = (uint8_t)(next_btns & (uint8_t)~prev_btns);
+    g_ring[g_ring_head].released = (uint8_t)(prev_btns & (uint8_t)~next_btns);
+    g_ring[g_ring_head].source = src;
+    g_ring[g_ring_head].wheel = wheel;
+    g_ring_head = next;
+}
+
 void mouse_set_bounds(int width, int height) {
     if (width > 0) g_screen_w = width;
     if (height > 0) g_screen_h = height;
@@ -100,6 +143,7 @@ int mouse_init(void) {
     g_irq_count = 0;
     g_packet_errors = 0;
     g_packet_idx = 0;
+    g_ps2_packet_target = 3;
     g_ring_head = 0;
     g_ring_tail = 0;
 
@@ -135,6 +179,18 @@ int mouse_init(void) {
         return 0;
     }
 
+    g_ps2_packet_target = 3;
+    if (mouse_try_intellimouse_wheel()) {
+        g_ps2_packet_target = 4;
+        mouse_log("PS/2 wheel mode enabled");
+    } else if (!mouse_expect_ack(0xF6u)) {
+        mouse_log("wheel probe reset failed");
+        i8042_enable_first_port();
+        i8042_enable_second_port();
+        __asm__ volatile("sti");
+        return 0;
+    }
+
     if (!mouse_expect_ack(0xF4u)) {
         mouse_log("enable reporting failed");
         i8042_enable_first_port();
@@ -153,6 +209,8 @@ int mouse_init(void) {
 
 void mouse_irq_handler(void) {
     uint8_t st = inb(0x64);
+    int need = (int)g_ps2_packet_target;
+
     if (!(st & 0x20u)) {
         pic_send_eoi(12);
         return;
@@ -173,7 +231,7 @@ void mouse_irq_handler(void) {
 
     g_packet[g_packet_idx++] = data;
 
-    if (g_packet_idx < 3) {
+    if (g_packet_idx < need) {
         pic_send_eoi(12);
         return;
     }
@@ -193,6 +251,11 @@ void mouse_irq_handler(void) {
     if (flags & 0x20u) dy |= ~0xFF;
     dy = -dy;
 
+    int8_t wheel = 0;
+    if (need >= 4) {
+        wheel = (int8_t)g_packet[3];
+    }
+
     int nx = g_abs_x + dx;
     int ny = g_abs_y + dy;
     if (nx < 0) nx = 0;
@@ -206,56 +269,26 @@ void mouse_irq_handler(void) {
     uint8_t next_btns = flags & 0x07u;
     g_btns = next_btns;
 
-    int next = (g_ring_head + 1) % MOUSE_RING_SIZE;
-    if (next != g_ring_tail) {
-        g_ring[g_ring_head].dx = (int16_t)dx;
-        g_ring[g_ring_head].dy = (int16_t)dy;
-        g_ring[g_ring_head].x = (int16_t)g_abs_x;
-        g_ring[g_ring_head].y = (int16_t)g_abs_y;
-        g_ring[g_ring_head].buttons = next_btns;
-        g_ring[g_ring_head].changed = (uint8_t)(prev_btns ^ next_btns);
-        g_ring[g_ring_head].pressed = (uint8_t)(next_btns & (uint8_t)~prev_btns);
-        g_ring[g_ring_head].released = (uint8_t)(prev_btns & (uint8_t)~next_btns);
-        g_ring[g_ring_head].source = MOUSE_SOURCE_PS2;
-        g_last_source = MOUSE_SOURCE_PS2;
-        g_ring_head = next;
-    } else {
-        g_packet_errors++;
-    }
+    ring_push(dx, dy, prev_btns, next_btns, wheel, MOUSE_SOURCE_PS2);
+    g_last_source = MOUSE_SOURCE_PS2;
 
     pic_send_eoi(12);
 }
 
-void mouse_push_usb_event(int dx, int dy, uint8_t next_btns) {
-    int nx, ny, next;
-    uint8_t prev_btns;
-
-    nx = g_abs_x + dx;
-    ny = g_abs_y + dy;
+void mouse_push_usb_event(int dx, int dy, uint8_t next_btns, int8_t wheel) {
+    uint8_t prev_btns = g_btns;
+    int nx = g_abs_x + dx;
+    int ny = g_abs_y + dy;
     if (nx < 0) nx = 0;
     if (ny < 0) ny = 0;
     if (nx >= g_screen_w) nx = g_screen_w - 1;
     if (ny >= g_screen_h) ny = g_screen_h - 1;
     g_abs_x = nx;
     g_abs_y = ny;
-
-    prev_btns = g_btns;
     g_btns = next_btns;
 
-    next = (g_ring_head + 1) % MOUSE_RING_SIZE;
-    if (next != g_ring_tail) {
-        g_ring[g_ring_head].dx       = (int16_t)dx;
-        g_ring[g_ring_head].dy       = (int16_t)dy;
-        g_ring[g_ring_head].x        = (int16_t)g_abs_x;
-        g_ring[g_ring_head].y        = (int16_t)g_abs_y;
-        g_ring[g_ring_head].buttons  = next_btns;
-        g_ring[g_ring_head].changed  = (uint8_t)(prev_btns ^ next_btns);
-        g_ring[g_ring_head].pressed  = (uint8_t)(next_btns & (uint8_t)~prev_btns);
-        g_ring[g_ring_head].released = (uint8_t)(prev_btns & (uint8_t)~next_btns);
-        g_ring[g_ring_head].source   = MOUSE_SOURCE_USB;
-        g_last_source = MOUSE_SOURCE_USB;
-        g_ring_head = next;
-    }
+    ring_push(dx, dy, prev_btns, next_btns, wheel, MOUSE_SOURCE_USB);
+    g_last_source = MOUSE_SOURCE_USB;
 }
 
 int mouse_poll(mouse_event_t *out) {
