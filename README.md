@@ -4,8 +4,6 @@ A bare-metal hobby operating system for 32-bit x86 — written from scratch in C
 
 **Live demo:** [https://aswdbatch.github.io/Aswd-OS](https://aswdbatch.github.io/Aswd-OS)
 
-![Screenshot](example.png)
-
 ---
 
 ## Features
