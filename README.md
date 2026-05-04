@@ -143,6 +143,7 @@ src/
 ├── usbboot/          — Custom bootloader chain (MBR, VBR, stage2, trampoline)
 └── users/            — User management (up to 8 users, admin)
 ```
+If you want the really detailed list of what is what then check agents.md as i am too fucking lazy to reorganize it properly.
 
 ---
 
