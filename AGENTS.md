@@ -34,6 +34,11 @@ Whenever you make changes to the codebase, update the relevant sections of this 
 
 ---
 
+### Creators (Aswd's) note:
+Yes infact i did sit here for the past 3 hours to write it up with minimal AI help, how stupid of me, i know.
+
+---
+
 ## Project Overview
 
 **AswdOS** is a bare-metal hobby operating system targeting 32-bit x86 (i386). Current version: **v0.9.1**.

@@ -4,8 +4,6 @@ A bare-metal hobby operating system for 32-bit x86 — written from scratch in C
 
 **Live demo:** [https://aswdbatch.github.io/Aswd-OS](https://aswdbatch.github.io/Aswd-OS)
 
-![Screenshot](example.png)
-
 ---
 
 ## Features
@@ -150,6 +148,7 @@ src/
 ├── usbboot/          — Custom bootloader chain (MBR, VBR, stage2, trampoline)
 └── users/            — User management (up to 8 users, admin)
 ```
+If you want the really detailed list of what is what then check agents.md as i am too fucking lazy to reorganize it properly.
 
 ---
 
