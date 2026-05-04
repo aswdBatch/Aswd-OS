@@ -11,7 +11,7 @@ A bare-metal hobby operating system for 32-bit x86 — written from scratch in C
 ## Features
 
 - **GUI Desktop** — window manager with taskbar, start menu, desktop icons, drag/resize, up to 8 windows
-- **15 Built-in Apps** — terminal, file manager, text editor, browser, calculator, notes, snake game, task manager, settings, OS info, app store, AX Studio IDE, AX Docs viewer, Work180 office suite, AX App Runner
+- **10 Desktop Apps + 6 More** — terminal, file manager, notes, office suite, app store, OS info, settings, task manager, AX Studio, plus snake, calculator, browser, editor, AX Docs, AX App Runner
 - **FAT32 Filesystem** — full read/write with long filenames, directory support, soft-delete to recycle bin, move/copy (recursive)
 - **TCP/IP Networking** — complete stack with DHCP, DNS, HTTP client; supports RTL8139, RTL8168, and e1000 NICs
 - **WiFi** — WPA/WPA2-PSK with 5 backends: Intel 2200/3945, Atheros AR5k/AR9k, Broadcom BCM43xx, Realtek RTL8187
@@ -91,21 +91,26 @@ Flash `dist\aswd-usb.img` to a USB stick with **Rufus** in **DD Image mode**, th
 | Command | Description | Command | Description |
 |---|---|---|---|
 | `help` | List all commands | `df` | Show disk usage |
-| `osinfo` | OS version info | `cd <path>` | Change directory |
+| `osinfo` | OS version + changelog | `cd <path>` | Change directory |
 | `sysinfo` | CPU/RAM info | `cat <file>` | Print file |
 | `clear` | Clear screen | `write <file>` | Write to file |
-| `echo <text>` | Print text | `rm <file>` | Delete (recycle bin) |
+| `echo <text>` | Print text | `rm <file>` | Delete (recycle bin, `-f` for force) |
 | `confirm <msg>` | Ask confirmation | `mkdir <dir>` | Create directory |
-| `run <script>` | Run built-in script | `cp <src> <dst>` | Copy file/dir |
-| `pwd` | Print working dir | `mv <src> <dst>` | Move file/dir |
-| `ls` | List directory | `find <pattern>` | Search for files |
-| `grep <pattern>` | Search contents | `history` | Command history |
-| `ln <target> <link>` | Create link | `inspect` | Inspect filesystem |
-| `test` | Run diagnostics | `compile` | Compile script |
-| `logs` | Show boot logs | `power` | Shutdown/reboot |
-| `ping <host>` | ICMP echo | `http <url>` | Fetch URL |
-| `ax <file.ax>` | Run Ax script | `settings` | Open settings |
-| `vfstest` | Test VFS | `bootlog` | Dump boot log |
+| `run <script>` | Run built-in script | `cp <src> <dst>` | Copy file/dir (`-r` for recursive) |
+| `pwd` | Print working dir | `mv <src> <dst>` | Move/rename file |
+| `ls` | List directory (`-l`, `-s` flags) | `rmdir <dir>` | Remove empty directory |
+| `grep <pattern>` | Search file contents | `find <pattern>` | Search for entries |
+| `history` | Command history | `ln <target> <link>` | Create link |
+| `inspect` | FAT volume summary | `test` | Run test scripts |
+| `compile` | Remote compile | `logs` | Boot log lines |
+| `ping <host>` | Ping IP | `fetch <url>` | HTTP GET |
+| `nslookup <host>` | DNS lookup | `ifconfig` | Network config |
+| `ax <file.ax>` | Run Ax script | `axapp <file.ax>` | Open AX app |
+| `edit <file>` | Text editor | `exit` | Return to Program Manager |
+| `reboot` | Reboot system | `rebootaswd` | Reboot to AswdOS |
+| `date` | Date/time | `disktest` | Read boot sector |
+| `diskinfo` | Disk diagnostics | `bpb` | FAT32 boot sector |
+| `fattest` | List FAT directory | `vfstest` | Test file ops |
 
 ### Confirmation Keywords
 
@@ -132,14 +137,14 @@ src/
 ├── editor/           — TUI text editor core
 ├── explorer/         — Legacy TUI application hub
 ├── fs/               — Virtual filesystem layer over FAT32
-├── gui/              — Window manager, theme engine, 15+ applications
+├── gui/              — Window manager, theme engine, 15 GUI applications
 ├── input/            — Unified input abstraction (serial, keyboard, mouse)
 ├── lang/             — "Ax" interpreted language (lexer, parser, evaluator)
 ├── lib/              — Freestanding string/memory utilities (no libc)
 ├── net/              — Full TCP/IP stack + NIC drivers + WiFi + HTTP
 ├── script/           — Legacy .aswd scripting system
 ├── settings/         — TUI settings screen
-├── shell/            — Interactive REPL + 30+ commands
+├── shell/            — Interactive REPL + 42 commands
 ├── tui/              — Text-mode UI primitives
 ├── usb/              — USB host stack (UHCI/OHCI/EHCI/xHCI) + HID
 ├── usbboot/          — Custom bootloader chain (MBR, VBR, stage2, trampoline)
@@ -154,19 +159,19 @@ src/
 |---|---|
 | **Terminal** | Embedded shell with line editing and 16-entry history |
 | **Files** | File manager with sidebar, address bar, icon/name/size/date columns |
-| **Editor** | Text editor with toolbar, line numbers, syntax-aware editing |
-| **OS Info** | System details: version, CPU, RAM, storage, changelog, uptime |
-| **Settings** | 5 tabs: Display, System, Devices, Users, Network |
-| **Task Manager** | Lists windows, USB devices, sessions; can close windows |
-| **Snake** | Snake game on 20×20 grid with scoring |
 | **Notes** | Simple notepad with save/load |
+| **180 Work** | Office suite: documents, spreadsheets, presentations |
 | **App Store** | Browse and launch all installed apps |
-| **Calculator** | Basic arithmetic with expression preview |
-| **Browser** | HTTP browser with HTML rendering and history |
-| **AX Docs** | Ax language documentation viewer |
+| **OS Info** | System details: version, CPU, RAM, storage, changelog, uptime |
+| **Control Panel** | 5 tabs: Display, System, Devices, Users, Network |
+| **Task Manager** | Lists windows, USB devices, sessions; can close windows |
 | **AX Studio** | Visual IDE for building AX apps (design + logic wiring) |
-| **AX App Runner** | Executes .ax visual app projects with multi-scene support |
-| **Work180** | Office suite: documents, spreadsheets, presentations |
+| **Snake** | Snake game on 20×20 grid with scoring (App Store only) |
+| **Calculator** | Basic arithmetic with expression preview (App Store only) |
+| **Browser** | HTTP browser with HTML rendering and history (App Store only) |
+| **Editor** | Text editor with toolbar, line numbers (via `edit` command) |
+| **AX Docs** | Ax language documentation viewer (via Editor) |
+| **AX App Runner** | Executes .ax visual app projects (via `axapp` command) |
 
 ---
 

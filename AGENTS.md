@@ -1,5 +1,39 @@
 # AswdOS — Agent Guide
 
+## Documentation Policy
+
+**This file is the single source of truth for project structure and conventions. Never let it go stale.**
+
+### Auto-Update Rules
+
+Whenever you make changes to the codebase, update the relevant sections of this file **in the same session** — do not ask the user to confirm documentation updates.
+
+| When you... | Also update... |
+|---|---|
+| Add, rename, move, or delete a `.c`, `.h`, `.asm` file, or directory | Directory structure tree below |
+| Add a new shell command | Shell commands table (this file + README.md) |
+| Add or remove a GUI app from the desktop registry (`g_apps[]` in `gui.c`) | GUI apps table (this file + README.md) |
+| Add a new driver, subsystem, or dependency | Directory structure + relevant architecture sections |
+| Change a build target, flag, or toolchain requirement | Build System section |
+| Implement a feature, fix a bug, or update UI | `src/common/changelog.c` |
+| Bump the version in `src/common/config.h` | Version references here + new changelog entry |
+| Change anything user-facing | README.md (features, commands, screenshots) |
+| Delete a file or directory referenced here | Remove its entry from the tree below |
+| Significantly change the UI | Suggest updating `example.png` |
+
+### Hierarchy: what to update when
+
+- **AGENTS.md** — internal agent reference. Always update when code changes.
+- **README.md** — public-facing documentation. Update when features, commands, or user-visible behavior change.
+- **`src/common/changelog.c`** — release notes embedded in the OS. Update for every feature/fix.
+- **`src/common/config.h`** — version string. Only update when intentionally releasing a new version.
+
+### Principle
+
+> Code and docs are one unit of work. If you change code without updating docs, the change is incomplete.
+
+---
+
 ## Project Overview
 
 **AswdOS** is a bare-metal hobby operating system targeting 32-bit x86 (i386). Current version: **v0.9.1**.
@@ -8,7 +42,7 @@
 - **No libc, no malloc** — all buffers are static and sized at compile time.
 - BIOS/CSM boot only (no UEFI support).
 - Custom bootloader chain for USB, GRUB multiboot for ISO.
-- Features: FAT32 filesystem, full TCP/IP networking, USB host stack, GUI desktop with 15+ apps, a shell, two scripting systems, and user authentication.
+- Features: FAT32 filesystem, full TCP/IP networking, USB host stack, GUI desktop with 10 registered apps (plus editor, AX Docs, AX App Runner accessible via other entry points), a shell with 42 commands, two scripting systems, and user authentication.
 
 Live demo: [https://aswdbatch.github.io/Aswd-OS](https://aswdbatch.github.io/Aswd-OS) (runs via v86 JS emulator — slower than native).
 
@@ -81,16 +115,15 @@ Live demo: [https://aswdbatch.github.io/Aswd-OS](https://aswdbatch.github.io/Asw
 
 ```
 C:\aswd-os/
-├── Makefile — Build system: compiles 107 C files + 6 ASM files, produces ISO and USB image
+├── Makefile — Build system: compiles ~100 C files + 6 ASM files, produces ISO and USB image
 ├── build.bat — Windows build wrapper: sets PATH, validates tools, runs make, optionally launches QEMU
 ├── linker.ld — GNU linker script: kernel at 1 MiB, sections .multiboot .text .rodata .data .bss (all 4K-aligned)
 ├── grub.cfg — GRUB config: 0s timeout, prefers 1366x768x32, multiboots /boot/kernel.elf
-├── AGENTS.md — This file: project guide, structure, conventions
+├── AGENTS.md — This file: project guide, structure, conventions, auto-update policy
 ├── README.md — User-facing docs: build instructions, shell commands, boot notes
 ├── CLAUDE.md — Instructions for Claude Code (AI assistant)
 ├── TODO.md — Planned features and improvements
 ├── AX_docs.md — Documentation for the Ax scripting language
-├── README.md — User-facing docs: build instructions, shell commands, boot notes
 ├── example.png — Screenshot of the OS
 │
 ├── scripts/
@@ -338,7 +371,7 @@ C:\aswd-os/
     │   ├── wifi_ath5k.h — Declares ath5k_probe() and ath5k_backend_ops
     │   ├── wifi_ath9k.c — Atheros AR9xxx (PCIe) WiFi: MMIO-based; RTC power management; descriptor ring TX/RX; reset; beacon/probe handling; mac80211 backend
     │   ├── wifi_ath9k.h — Declares ath9k_probe() and ath9k_backend_ops
-    │   ├── wifi_bcm43xx.c — Broadcom BCM43xx (PCI) WiFi: MMIO-based; DMA descriptor rings; MAC control; channel selection; scan/connect; mac80211 backend
+    │   ├── wifi_bcm43xx.c — Broadcom BCM43xx (PCI) WiFi: MMIO-based; DMA descriptor rings; MAC control; channel selection; scan/connect; mac80211 backend (no .h file)
     │   ├── wifi_intel.c — Intel PRO/Wireless 2200BG/3945ABG (PCI) WiFi: command/event queue; RXON configuration; scan; association; power management; mac80211 backend
     │   ├── wifi_intel.h — Declares intel_wifi_probe(), intel_wifi_init(), intel_wifi_backend_ops
     │   └── wifi_rtl8187.c — Realtek RTL8187 (USB) WiFi: USB control transfers for register access; bulk IN/OUT endpoints; reset; TX/RX config; scan/connect; mac80211 backend
@@ -359,7 +392,7 @@ C:\aswd-os/
     ├── shell/ — Interactive command-line shell
     │   ├── shell.c — REPL: reads input, splits args, dispatches to commands; prints storage summary (backend type, partition); manages normal vs raw mode
     │   ├── shell.h — Declares shell_mode_t (NORMAL, RAW), shell_run(), shell_get_mode(), shell_is_raw_mode()
-    │   ├── commands.c — Command dispatcher with 30+ commands: help, osinfo, sysinfo, clear, echo, run, confirm, pwd, ls, df, cd, cat, write, rm, mkdir, cp, mv, find, grep, history, ln, inspect, test, compile, logs, power (shutdown/reboot), ping, http, ax (run .ax script), settings, vfstest, bootlog, and more
+    │   ├── commands.c — Command dispatcher with 42 commands (see Shell Commands table below); table-driven with cmd_fn_t callbacks
     │   ├── commands.h — Declares commands_init() and commands_dispatch(argc, argv) — returns 1 to exit shell
     │   ├── sysinfo.c — Prints CPU brand string (via CPUID) and RAM info (lower/upper KB from multiboot)
     │   └── sysinfo.h — Declares sysinfo_print()
@@ -439,35 +472,47 @@ bios.asm (bios_start) → clears BSS, sets up stack, flushes GDT, calls kernel_m
 ### Theme System (`src/gui/theme.h`)
 - Design tokens for colors, spacing, typography
 - Layout buckets: compact, comfortable, wide (auto-selected by screen width)
-- UI component draw functions: cards, dialogs, panels, buttons, fields, checkboxes, scrollbars, list rows, tabs, toolbars, status bars, page headers, info strips, empty states, auth cards, sidebars, badges, badges, table headers
+- UI component draw functions: cards, dialogs, panels, buttons, fields, checkboxes, scrollbars, list rows, tabs, toolbars, status bars, page headers, info strips, empty states, auth cards, sidebars, badges, table headers
 - Animation helpers: ease, progress, lerp (int and color)
 
 ### Adding a New GUI App
 1. Create `src/gui/myapp_gui.c` and `src/gui/myapp_gui.h`
 2. Implement a `void myapp_gui_launch(void)` function that calls `gui_window_create()` and sets up callbacks
-3. Add the app to the app registry in `src/gui/gui.c` (the `gui_app_t` table)
+3. Add the app to the app registry in `src/gui/gui.c` (the `gui_app_t` table `g_apps[]`)
 4. Add `myapp_gui.c` to `C_SOURCES` in the `Makefile`
 5. Add an icon variant to `src/assets/icon_assets.c` (or use an existing one)
 
-### GUI Applications (15 apps)
+### GUI Applications
+
+**Desktop apps** (registered in `g_apps[]` in `gui.c`):
 
 | App | File | Description |
 |---|---|---|
 | Terminal | `shell_gui.c` | Embedded shell with line editing and 16-entry history |
 | Files | `files_gui.c` | File manager with sidebar, address bar, columns |
-| Editor | `editor_gui.c` | Text editor with toolbar, line numbers, syntax editing |
-| OS Info | `osinfo_gui.c` | System info: version, CPU, RAM, storage, changelog, uptime |
-| Settings | `settings_gui.c` | 5-tab settings: Display, System, Devices, Users, Network |
-| Task Manager | `taskmgr.c` | Lists windows, USB devices, sessions; can close windows |
-| Snake | `snake_gui.c` | Snake game on 20×20 grid with scoring |
 | Notes | `notes_gui.c` | Simple notepad with save/load |
+| 180 Work | `work_gui.c` | Office suite: documents, spreadsheets, presentations |
 | App Store | `appstore_gui.c` | Browse and launch installed apps |
-| Calculator | `calc_gui.c` | Basic arithmetic with expression preview |
-| Browser | `browser_gui.c` | HTTP browser with HTML rendering, history stack |
-| AX Docs | `axdocs_gui.c` | Ax language documentation viewer |
+| OS Info | `osinfo_gui.c` | System info: version, CPU, RAM, storage, changelog, uptime |
+| Control Panel | `settings_gui.c` | 5-tab settings: Display, System, Devices, Users, Network |
+| Task Manager | `taskmgr.c` | Lists windows, USB devices, sessions; can close windows |
 | AX Studio | `axstudio_gui.c` | Visual IDE for building AX apps |
-| AX App Runner | `axapp_gui.c` | Runs .ax visual app projects |
-| Work180 | `work_gui.c` | Office suite: documents, spreadsheets, presentations |
+
+**App Store only** (not on desktop):
+
+| App | File | Description |
+|---|---|---|
+| Snake | `snake_gui.c` | Snake game on 20×20 grid with scoring |
+| Calculator | `calc_gui.c` | Basic arithmetic with expression preview |
+| Browser | `browser_gui.c` | HTTP browser with HTML rendering, history stack (dev-only flag) |
+
+**Accessible via other entry points** (not in app registry):
+
+| App | File | Launched from |
+|---|---|---|
+| Editor | `editor_gui.c` | App Store or `edit` shell command |
+| AX Docs | `axdocs_gui.c` | "Docs" button in Editor toolbar |
+| AX App Runner | `axapp_gui.c` | `axapp` shell command or Studio "Run" button |
 
 ---
 
@@ -494,7 +539,7 @@ Physical:     RTL8139 (PCI Fast Ethernet) / RTL8168 (PCIe Gigabit) / e1000 (PCI 
 | `wifi_intel.c` | Intel PRO/Wireless 2200BG / 3945ABG | PCI | Implemented |
 | `wifi_ath5k.c` | Atheros AR5xxx | PCI | Implemented |
 | `wifi_ath9k.c` | Atheros AR9xxx | PCIe | Implemented |
-| `wifi_bcm43xx.c` | Broadcom BCM43xx | PCI | Implemented |
+| `wifi_bcm43xx.c` | Broadcom BCM43xx | PCI | Implemented (no .h file) |
 | `wifi_rtl8187.c` | Realtek RTL8187 | USB | Implemented |
 
 ### Site Allowlist
@@ -552,40 +597,52 @@ Physical:     RTL8139 (PCI Fast Ethernet) / RTL8168 (PCIe Gigabit) / e1000 (PCI 
 
 ## Shell Commands
 
+The command table is defined in `src/shell/commands.c` as a `command_t` array. To add a command: add a `cmd_*` forward declaration, implement the function, and add an entry to `g_cmds[]`.
+
 | Command | Description |
 |---|---|
 | `help` | List all commands |
-| `osinfo` | Show OS version and build info |
-| `sysinfo` | Show CPU brand and RAM info |
-| `clear` | Clear screen |
-| `echo <text>` | Print text |
+| `osinfo` | Show OS version and changelog |
+| `sysinfo` | Show CPU/RAM info |
+| `clear` | Reset the shell frame |
+| `echo` | Echo text |
+| `run` | Run a built-in script |
 | `confirm <message>` | Ask for confirmation |
-| `run <script>` | Run a built-in script |
-| `pwd` | Print working directory |
-| `ls` | List directory contents |
+| `pwd` | Print current directory |
+| `ls` | List directory (supports `-l` and `-s` flags) |
 | `df` | Show disk usage |
 | `cd <path>` | Change directory |
-| `cat <file>` | Print file contents |
-| `write <file>` | Write to a file |
-| `rm <file>` | Remove file (soft-delete to RECYCLE.BIN) |
-| `mkdir <dir>` | Create directory |
-| `cp <src> <dst>` | Copy file or directory (recursive) |
-| `mv <src> <dst>` | Move file or directory |
-| `find <pattern>` | Search for files |
-| `grep <pattern>` | Search file contents |
-| `history` | Show command history |
-| `ln <target> <link>` | Create link |
-| `inspect` | Inspect filesystem details |
-| `test` | Run diagnostics |
-| `compile` | Compile a script |
-| `logs` | Show boot logs |
-| `power` | Shutdown or reboot |
-| `ping <host>` | Send ICMP echo request |
-| `http <url>` | Fetch URL via HTTP |
-| `ax <file>` | Run an Ax script |
-| `settings` | Open settings |
-| `vfstest` | Test VFS operations |
-| `bootlog` | Dump boot log |
+| `cat <file>` | Print a file |
+| `write <file>` | Write text to a file |
+| `rm <file>` | Remove file (send to /ROOT/RECYCLE.BIN); `-f` for permanent delete |
+| `cp <src> <dst>` | Copy file or directory (`-r`) |
+| `mv <src> <dst>` | Move or rename a file |
+| `mkdir <dir>` | Create a directory |
+| `rmdir <dir>` | Remove an empty directory |
+| `edit <file>` | Open the text editor |
+| `exit` | Return to Program Manager |
+| `disktest` | Read the boot sector |
+| `diskinfo` | Show disk backend diagnostics |
+| `bpb` | Show FAT32 boot sector fields |
+| `fattest` | List the current FAT directory |
+| `vfstest` | Exercise basic file ops |
+| `reboot` | Reboot the system |
+| `rebootaswd` | Reboot to AswdOS (USB) |
+| `date` | Show current date and time |
+| `ping <host>` | Ping an IP address |
+| `fetch <url>` | HTTP GET a URL |
+| `nslookup <host>` | DNS lookup a hostname |
+| `ifconfig` | Show network configuration |
+| `ax <file.ax>` | Run an Ax (.ax) script |
+| `axapp <file.ax>` | Open an AX app (.ax project) |
+| `find <pattern>` | Find entries in cwd matching substring |
+| `grep <pattern>` | Search lines in a file for substring |
+| `history` | Show shell input history |
+| `ln <target> <link>` | Link files (not supported on FAT32) |
+| `inspect` | Show FAT volume summary |
+| `test` | Run scripts under /ROOT/tests/ |
+| `compile` | Remote compile (not configured) |
+| `logs` | Show boot log lines |
 
 ### Confirmation Keywords
 - **YES**: `acknowledge`, `ack`, `yes`, `y`
@@ -618,7 +675,7 @@ Physical:     RTL8139 (PCI Fast Ethernet) / RTL8168 (PCIe Gigabit) / e1000 (PCI 
 
 ### FAT32 Soft Delete
 - `rm` moves files to `RECYCLE.BIN` directory instead of permanent deletion
-- `rm_force` bypasses the recycle bin
+- `rm -f` bypasses the recycle bin
 - Rename fallback if `RECYCLE.BIN` name conflicts
 
 ---
